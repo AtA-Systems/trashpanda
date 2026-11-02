@@ -13,6 +13,7 @@ except ImportError:  # pragma: no cover
     F = None  # type: ignore
 
 from .data import MMapTokenDataset
+from .provenance import make_record
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,29 @@ class EvaluationResult:
     perplexity: float
     tokens: int
     batches: int
+
+
+def evaluation_record(
+    result: EvaluationResult,
+    *,
+    split: str,
+    settings: dict[str, Any],
+    input_identity: str | None = None,
+    model_identity: str | None = None,
+) -> dict[str, Any]:
+    """Turn observed evaluation output into a portable, explicit record."""
+    return make_record(
+        "evaluation",
+        {
+            "split": split,
+            "settings": dict(settings),
+            "counts": {"tokens": result.tokens, "batches": result.batches},
+            "metrics": {"loss": result.loss, "perplexity": result.perplexity},
+            "input_identity": input_identity,
+            "model_identity": model_identity,
+            "evidence_state": "observed",
+        },
+    )
 
 
 def _require_torch() -> None:
@@ -109,4 +133,4 @@ def sample_text(model: Any, tokenizer: Any, prompt: str, **kwargs: Any) -> str:
     return tokenizer.decode(sample(model, ids, **kwargs))
 
 
-__all__ = ["EvaluationResult", "evaluate", "sample", "sample_text"]
+__all__ = ["EvaluationResult", "evaluate", "evaluation_record", "sample", "sample_text"]

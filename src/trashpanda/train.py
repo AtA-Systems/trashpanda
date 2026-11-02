@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -9,6 +10,9 @@ import tempfile
 import time
 import random
 import signal
+import subprocess
+import sys
+import uuid
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -25,6 +29,7 @@ from .checkpoint import TrainingState, checkpoint_path, load_checkpoint, restore
 from .config import Config, TrainingConfig
 from .data import MMapTokenDataset, PCG64Sampler
 from .model import build_model, causal_loss
+from .provenance import evaluate_policy, make_record, record_identity, sha256_file
 from .tokenizer import DeterministicTokenizer, tokenizer_snapshot
 
 
@@ -157,6 +162,112 @@ def _latest_checkpoint(path: str | Path) -> Path:
     return candidates[-1]
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _software_identity() -> dict[str, Any]:
+    """Capture an allowlisted environment summary, never the process environment."""
+    result: dict[str, Any] = {"python": sys.version.split()[0]}
+    if torch is not None:
+        result["torch"] = getattr(torch, "__version__", "unknown")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=2
+        ).stdout.strip()
+        result["git_commit"] = commit
+        dirty = subprocess.run(["git", "diff", "--quiet"], check=False, timeout=2).returncode != 0
+        result["git_dirty"] = dirty
+    except (OSError, subprocess.SubprocessError):
+        result["git_commit"] = "unknown"
+        result["git_dirty"] = None
+    return result
+
+
+def _input_records(dataset: MMapTokenDataset) -> list[dict[str, Any]]:
+    values = dataset.manifest.get("provenance", {}).get("records", [])
+    return [dict(value) for value in values if isinstance(value, Mapping) and value.get("type") in {"input", "preparation"}]
+
+
+def _previous_segments(value: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    return [dict(item) for item in value.get("segments", []) if isinstance(item, Mapping)]
+
+
+def _provenance_snapshot(
+    *,
+    run_id: str,
+    session_id: str,
+    start_time: str,
+    end_time: str | None,
+    status: str,
+    elapsed_seconds: float,
+    start_state: TrainingState,
+    state: TrainingState,
+    parent_checkpoint_sha256: str | None,
+    input_records: list[dict[str, Any]],
+    previous_segments: list[dict[str, Any]],
+    config: Config,
+    policy_decision: Mapping[str, Any] | None = None,
+    source_target_counts: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    segment = make_record(
+        "execution_segment",
+        {
+            "run_id": run_id,
+            "session_id": session_id,
+            "status": status,
+            "start_time_utc": start_time,
+            "end_time_utc": end_time,
+            "elapsed_seconds": elapsed_seconds,
+            "start_counters": start_state.to_dict(),
+            "end_counters": state.to_dict(),
+            "parent_checkpoint_sha256": parent_checkpoint_sha256,
+            "input_records": [record["id"] for record in input_records],
+            "software": _software_identity(),
+            "config_sha256": record_identity(config.to_dict()),
+            "evidence_state": "observed",
+            "policy_decision": dict(policy_decision) if policy_decision is not None else {"decision": "not_evaluated"},
+        },
+    )
+    segments = previous_segments + [segment]
+    run = make_record(
+        "run",
+        {
+            "run_id": run_id,
+            "status": status,
+            "segments": [item["id"] for item in segments],
+            "parents": [item["parent_checkpoint_sha256"] for item in segments if item.get("parent_checkpoint_sha256")],
+            "cumulative_counters": state.to_dict(),
+            "actual_target_accounting": {
+                "committed_targets": state.consumed_tokens,
+                "source_target_counts": {key: int(value) for key, value in (source_target_counts or {}).items()},
+            },
+            "requested_budget": config.training.token_budget,
+            "requested_budget_is_evidence": False,
+            "input_records": [record["id"] for record in input_records],
+            "software": _software_identity(),
+            "config_sha256": record_identity(config.to_dict()),
+            "evidence_state": "observed",
+            "policy_decision": dict(policy_decision) if policy_decision is not None else {"decision": "not_evaluated"},
+        },
+    )
+    deduped: dict[str, dict[str, Any]] = {}
+    for record in input_records + segments + [run]:
+        deduped[str(record["id"])] = record
+    return {
+        "run_id": run_id,
+        "session_id": session_id,
+        "start_time_utc": start_time,
+        "end_time_utc": end_time,
+        "status": status,
+        "segments": segments,
+        "run_record": run,
+        "records": list(deduped.values()),
+    }
+
+
 def train(
     config: Config,
     dataset: MMapTokenDataset,
@@ -166,6 +277,7 @@ def train(
     resume: str | Path | None = None,
     checkpoint_dir: str | Path | None = None,
     max_steps: int | None = None,
+    policy: Mapping[str, Any] | None = None,
 ) -> TrainResult:
     """Run updates until the shifted-token budget or max_steps is reached."""
     _require_torch()
@@ -180,6 +292,13 @@ def train(
     )
     if schedule.tokens_per_update <= 0:
         raise ValueError("invalid token schedule")
+    input_records = _input_records(dataset)
+    policy_decision: Mapping[str, Any] | None = None
+    if policy is not None:
+        policy_decision = evaluate_policy(input_records, policy)
+        if policy_decision.get("decision") == "deny":
+            reasons = "; ".join(reason.get("message", reason.get("code", "unknown")) for reason in policy_decision.get("reasons", []))
+            raise PermissionError(f"provenance policy denied training: {reasons}")
     if model is None:
         seed_everything(config.training.seed, deterministic=config.runtime.deterministic)
         model = build_model(config.model, seed=config.training.seed)
@@ -202,11 +321,15 @@ def train(
     sampler = PCG64Sampler(len(dataset), config.training.seed, repeat_data=config.training.repeat_data)
     state = TrainingState()
     resume_path: Path | None = None
+    resume_payload: dict[str, Any] | None = None
+    prior_provenance: Mapping[str, Any] | None = None
     if resume:
         resume_path = _latest_checkpoint(resume)
         payload = load_checkpoint(resume_path, model=model, optimizer=optimizer, map_location=str(device))
+        resume_payload = payload
         state = TrainingState.from_dict(payload["state"])
         sampler.load_state_dict(payload["sampler"])
+        prior_provenance = payload.get("extra", {}).get("provenance") if isinstance(payload.get("extra"), Mapping) else None
         expected_identity = dataset.manifest.get("identity")
         if payload.get("data_identity") and expected_identity and payload["data_identity"] != expected_identity:
             raise ValueError("checkpoint data identity does not match prepared dataset")
@@ -233,6 +356,28 @@ def train(
         available = len(dataset) - (sampler.position if sampler._permutation else 0)
         updates_remaining = min(updates_remaining, max(0, available // config.training.batch_size))
     last_checkpoint = resume_path
+    if updates_remaining == 0 and resume_path is not None:
+        return TrainResult(
+            state=state,
+            checkpoint=resume_path,
+            device=str(device),
+            schedule=schedule,
+            model=model,
+            optimizer=optimizer,
+            sampler=sampler,
+            tokenizer=tokenizer,
+        )
+    run_id = str(prior_provenance.get("run_id")) if prior_provenance and prior_provenance.get("run_id") else str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    session_start = _utc_now()
+    start_state = TrainingState.from_dict(state.to_dict())
+    parent_digest = sha256_file(resume_path) if resume_path is not None else None
+    prior_segments = _previous_segments(prior_provenance)
+    source_target_totals: dict[str, int] = {}
+    if prior_provenance and isinstance(prior_provenance.get("run_record"), Mapping):
+        prior_counts = prior_provenance["run_record"].get("actual_target_accounting", {}).get("source_target_counts", {})
+        if isinstance(prior_counts, Mapping):
+            source_target_totals.update({str(key): int(value) for key, value in prior_counts.items()})
     scaler = torch.cuda.amp.GradScaler(enabled=config.training.precision == "fp16" and device.type == "cuda")
     autocast_enabled = config.training.precision in {"bf16", "fp16"} and device.type == "cuda"
     autocast_dtype = torch.bfloat16 if config.training.precision == "bf16" else torch.float16
@@ -244,6 +389,9 @@ def train(
             for _micro in range(config.training.grad_accumulation_steps):
                 indices = sampler.next_indices(config.training.microbatch_size)
                 inputs, targets = dataset.batch(indices)
+                target_attribution = getattr(dataset, "target_source_counts", lambda _indices: {})
+                for source_id, count in target_attribution(indices).items():
+                    source_target_totals[source_id] = source_target_totals.get(source_id, 0) + int(count)
                 inputs = inputs.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_enabled):
@@ -274,8 +422,24 @@ def train(
             should_save = state.update_step % config.training.checkpoint_interval == 0
             should_stop = boundary.requested
             if should_save or should_stop:
+                provenance = _provenance_snapshot(
+                    run_id=run_id,
+                    session_id=session_id,
+                    start_time=session_start,
+                    end_time=None,
+                    status="interrupted" if should_stop else "running",
+                    elapsed_seconds=time.perf_counter() - run_started,
+                    start_state=start_state,
+                    state=state,
+                    parent_checkpoint_sha256=parent_digest,
+                    input_records=input_records,
+                    previous_segments=prior_segments,
+                    config=config,
+                    policy_decision=policy_decision,
+                    source_target_counts=source_target_totals,
+                )
                 last_checkpoint = _save_training_checkpoint(
-                    destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset
+                    destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset, provenance=provenance
                 )
             with metrics_path.open("a", encoding="utf-8") as metrics:
                 metrics.write(json.dumps({
@@ -291,7 +455,23 @@ def train(
     # Always leave a checkpoint at the actual boundary, including a tiny run
     # shorter than the configured interval.
     if last_checkpoint is None or state.update_step > 0:
-        last_checkpoint = _save_training_checkpoint(destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset)
+        provenance = _provenance_snapshot(
+            run_id=run_id,
+            session_id=session_id,
+            start_time=session_start,
+            end_time=_utc_now(),
+            status="completed" if state.consumed_tokens >= config.training.token_budget else "stopped",
+            elapsed_seconds=time.perf_counter() - run_started,
+            start_state=start_state,
+            state=state,
+            parent_checkpoint_sha256=parent_digest,
+            input_records=input_records,
+            previous_segments=prior_segments,
+            config=config,
+            policy_decision=policy_decision,
+            source_target_counts=source_target_totals,
+        )
+        last_checkpoint = _save_training_checkpoint(destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset, provenance=provenance)
     return TrainResult(
         state=state,
         checkpoint=last_checkpoint,
@@ -314,6 +494,7 @@ def _save_training_checkpoint(
     sampler: PCG64Sampler,
     tokenizer: Any | None,
     dataset: MMapTokenDataset,
+    provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     if tokenizer is None:
         if config.model.vocab_size != 32:
@@ -338,6 +519,7 @@ def _save_training_checkpoint(
         tokenizer_snapshot=tokenizer_snapshot(tokenizer).to_dict(),
         tokenizer_files=tokenizer_files,
         data_identity=dataset.manifest.get("identity"),
+        extra={"provenance": dict(provenance)} if provenance is not None else None,
     )
 
 

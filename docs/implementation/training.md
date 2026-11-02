@@ -74,8 +74,10 @@ The [quickstart](../getting-started.md) shows the current CLI's explicit `--reci
 `--data`, `--output`, and checkpoint-file `--resume` arguments. The production driver
 has no resume flag; use the core CLI for a continuation of an interrupted run.
 
-Additional gaps: no checkpoint retention policy, no separate signed delivery
-manifest, and metrics append on resume without deduplicating records beyond a
-restored checkpoint. Do not launch a long production run without
-planning disk capacity and independent checkpoint copies. See the
+Additional gaps: no automatic checkpoint retention policy, detached signing is
+optional and adopter-configured, and metrics append on resume is still a
+diagnostic log rather than recovery authority. Provenance records in the
+checkpoint preserve committed state and parent digests, but an abrupt process
+death can leave a running segment with an unknown end time. Do not launch a
+long production run without planning disk capacity and independent checkpoint copies. See the
 [first-model completion proposal](../roadmap/first-model.md).

@@ -112,3 +112,29 @@ python -m pytest -q
 Retain the printed temporary directory if you want to inspect the generated
 manifest, metrics and checkpoints. A fresh Git clone does not include the
 historical large model binaries. [Artifact availability and GPU examples →](experiments.md)
+
+## Run the offline provenance fixture
+
+For the provenance acceptance path, use the project-owned fixture below. It
+creates two synthetic sources, performs real forward/backward updates on an
+exactly 100-parameter model, saves and resumes a tiny run, then emits only a
+portable bundle. The original temporary sources and checkpoint are not needed
+for verification.
+
+```bash
+export PROVENANCE_DEMO="$(mktemp -d)/export"
+python scripts/provenance_demo.py "$PROVENANCE_DEMO"
+python -m trashpanda provenance inspect "$PROVENANCE_DEMO" --json
+python -m trashpanda provenance verify "$PROVENANCE_DEMO" --json
+cp -a "$PROVENANCE_DEMO" "${PROVENANCE_DEMO}.relocated"
+python -m trashpanda provenance verify "${PROVENANCE_DEMO}.relocated" --json
+```
+
+The default result should report valid schema and payload integrity, complete
+local evidence, and an unsigned artifact. Unsigned means “not authenticated,”
+not “invalid.” To demonstrate integrity failure, edit `model.pt` and rerun
+verification. Rehashing every file can make integrity valid again, but it does
+not create a trusted signature. See
+[`implementation/provenance.md`](implementation/provenance.md) for policy,
+signing, privacy projections, legacy migration, and the optional Sourcelume
+exchange boundary.

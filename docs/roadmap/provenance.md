@@ -1,6 +1,7 @@
 # Proposal: provenance that travels with the model
 
-**Status: proposed; not an implemented artifact contract.**
+**Status: implemented in the local core; optional governance and registry
+integration remain adopter-controlled and explicitly invoked.**
 
 [Roadmap](README.md) · [Current metadata](../implementation/provenance.md)
 
@@ -41,8 +42,10 @@ Native Hugging Face loading should remain possible without executing custom code
    records. Keep registry publication optional and separately authorized. A local
    portable record should not require a public registry or disclosure of private data.
 
-The format, CLI, signing mechanism, and enforcement defaults are design proposals,
-not existing APIs. Do not add unverifiable fields merely to make a record look complete.
+The implemented format, CLI, optional signing, and policy defaults are described
+in [the implementation contract](../implementation/provenance.md). Unknown,
+withheld, unavailable, and not-applicable evidence remain distinct; no field is
+elevated into a legal or safety conclusion merely to make a record look complete.
 
 ## Security and governance decisions still needed
 

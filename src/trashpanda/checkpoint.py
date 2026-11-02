@@ -6,6 +6,7 @@ import os
 import random
 from pathlib import Path
 import re
+import hashlib
 from typing import Any, Mapping
 
 try:
@@ -181,6 +182,7 @@ def save_training_state(
     tokenizer_snapshot: Mapping[str, Any],
     model_file: str,
     model_sha256: str | None = None,
+    provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     """Save resumable optimizer/RNG state referencing external model weights.
 
@@ -204,6 +206,8 @@ def save_training_state(
     }
     if model_sha256:
         payload["model_sha256"] = model_sha256
+    if provenance is not None:
+        payload["provenance"] = dict(provenance)
     temporary = destination.with_name(destination.name + f".tmp-{os.getpid()}")
     try:
         with temporary.open("wb") as handle:
@@ -228,7 +232,18 @@ def load_checkpoint(path: str | Path, *, model: Any, optimizer: Any | None = Non
             from safetensors.torch import load_file
         except ImportError as exc:
             raise RuntimeError("bundle checkpoints require safetensors") from exc
-        model_path = checkpoint.parent / str(payload["model_file"])
+        model_name = str(payload["model_file"])
+        model_path = (checkpoint.parent / model_name).resolve()
+        if model_path.parent != checkpoint.parent.resolve() or not model_path.is_file():
+            raise ValueError("external model_file must be a regular sibling file")
+        expected_hash = payload.get("model_sha256")
+        if expected_hash:
+            digest = hashlib.sha256()
+            with model_path.open("rb") as handle:
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+            if digest.hexdigest() != expected_hash:
+                raise ValueError("external model hash mismatch; refusing to load model bytes")
         model.load_state_dict(load_file(str(model_path), device="cpu"))
     else:
         model.load_state_dict(payload["model"])

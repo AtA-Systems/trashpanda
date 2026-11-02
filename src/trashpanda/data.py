@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import defaultdict
 from pathlib import Path
 import struct
 from typing import Any, Iterator, Sequence
@@ -39,6 +40,9 @@ class SequenceReader:
         self.sequence_count = int(split_info["sequence_count"])
         self.token_count = int(split_info["token_count"])
         self.dropped_tokens = int(split_info.get("dropped_tokens", 0))
+        self.attribution = split_info.get("attribution", {})
+        self.source_target_counts = dict(split_info.get("source_target_counts", {}))
+        self._verify_tokenizer_files()
         self._shards: list[Any] = []
         self._offsets: list[int] = []
         offset = 0
@@ -60,6 +64,21 @@ class SequenceReader:
                 self._shards.append((path, shard_sequences))
         if offset != self.sequence_count:
             raise ValueError("manifest sequence count does not match shards")
+
+    def _verify_tokenizer_files(self) -> None:
+        expected = self.manifest.get("tokenizer_file_hashes", {})
+        if not expected:
+            return
+        tokenizer_dir = self.manifest_path.parent / "tokenizer"
+        for name, digest in expected.items():
+            path = tokenizer_dir / str(name)
+            if not path.is_file():
+                raise ValueError(f"tokenizer file is missing: {name}")
+            import hashlib
+
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual != digest:
+                raise ValueError(f"tokenizer hash mismatch: {name}")
 
     def __len__(self) -> int:
         return self.sequence_count
@@ -112,6 +131,28 @@ class SequenceReader:
     def iter_batches(self, indices: Iterator[Sequence[int]]) -> Iterator[tuple[Any, Any]]:
         for batch_indices in indices:
             yield self.batch(batch_indices)
+
+    def target_source_counts(self, indices: Sequence[int]) -> dict[str, int]:
+        """Return source ownership of actual prediction targets in sampled rows."""
+        ranges = self.attribution.get("ranges", [])
+        per_sequence = int(self.attribution.get("sequence_target_count", self.training_tokens_per_sequence))
+        counts: dict[str, int] = defaultdict(int)
+        if not ranges:
+            return dict(counts)
+        for index in indices:
+            start = int(index) * per_sequence
+            end = start + per_sequence
+            for item in ranges:
+                range_start = max(start, int(item["start"]))
+                range_end = min(end, int(item["end"]))
+                if range_start < range_end:
+                    counts[str(item["source_id"])] += range_end - range_start
+                if int(item["start"]) >= end:
+                    break
+        return dict(counts)
+
+    # Short alias for callers that use the language from the issue contract.
+    attribution_for_indices = target_source_counts
 
 
 MMapTokenDataset = SequenceReader

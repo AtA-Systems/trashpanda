@@ -14,14 +14,17 @@ organizational supply-chain assurances are separate claims.
 | Model and training loop | [`model.py`](../../src/trashpanda/model.py), [`train.py`](../../src/trashpanda/train.py) | [Training](training.md) |
 | State persistence | [`checkpoint.py`](../../src/trashpanda/checkpoint.py) | [Recovery and limitations](training.md) |
 | Evaluation and native HF files | [`evaluate.py`](../../src/trashpanda/evaluate.py), [`export.py`](../../src/trashpanda/export.py) | [Evaluation/export](export.md) |
-| Metadata across these boundaries | Manifests, checkpoint payloads, metrics | [Partial provenance](provenance.md) |
+| Metadata across these boundaries | `trashpanda.provenance`, manifests, checkpoint payloads, metrics | [Portable provenance](provenance.md) |
 
 ## Validation boundaries
 
 The existing [tests](../../tests) cover recipe/config validation, tiny model
-construction, preparation, token accounting, and a tiny train/resume/export path.
-They are not evidence of a complete production run, policy enforcement, federated
-privacy, or end-to-end artifact provenance.
+construction, preparation, token accounting, a tiny train/resume/export path,
+canonical provenance records, tamper detection, policy comparison, and exchange
+mapping. The `scripts/provenance_demo.py` fixture covers real CPU updates with a
+100-parameter model and a relocatable bundle. These are not evidence of legal
+compliance, independent factual assurance, federated privacy, or public registry
+publication.
 
 In particular, the current tiny end-to-end test evaluates a fresh model and checks
 export file existence; it does not compare exported logits with the resumed model

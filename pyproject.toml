@@ -20,6 +20,7 @@ dependencies = [
 huggingface = ["transformers>=4.40", "tokenizers>=0.15"]
 datasets = ["datasets>=2.16"]
 test = ["pytest>=7"]
+provenance = ["cryptography>=41"]
 
 [project.scripts]
 trashpanda = "trashpanda.cli:main"
@@ -29,3 +30,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+trashpanda = ["provenance/schemas/*.json"]
