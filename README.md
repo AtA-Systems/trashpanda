@@ -7,8 +7,9 @@ organization-approved data—and evidence of what went into them. The goal is a
 practical workflow for selecting a model, training it, and delivering weights
 with inspectable provenance, not another PyTorch or Hugging Face replacement.
 
-**Today:** an experimental single-machine Llama training foundation with an
-offline-first, inspectable provenance bundle. Provenance records are evidence
+**Today:** an experimental single-machine causal-LM training foundation with
+CLI-selectable tiny Llama and GPT-2 architectures, plus an offline-first,
+inspectable provenance bundle. Provenance records are evidence
 mechanisms, not a delivered certification, legal conclusion, safety verdict, or
 privacy guarantee. [Read the vision and boundaries →](docs/vision.md)
 
@@ -17,7 +18,8 @@ privacy guarantee. [Read the vision and boundaries →](docs/vision.md)
 | Capability | Current scope and implementation details |
 | --- | --- |
 | Local data preparation | Separate train/validation JSONL → token shards, counts, and integrity hashes. [How data flows](docs/implementation/data.md) |
-| Training and checkpoint state | Two fixed Llama recipes, token-budgeted PyTorch training, model/optimizer/RNG/sampler saves and resume support. [How training and recovery work—and their limits](docs/implementation/training.md) |
+| Training and checkpoint state | Tiny Llama and GPT-2 recipes selected with `--model`, token-budgeted PyTorch training, model/optimizer/RNG/sampler saves and resume support. [Supported models](docs/models.md) · [How training and recovery work—and their limits](docs/implementation/training.md) |
+| CLI-selectable models | `--model llama` and `--model gpt2` use explicit native Hugging Face adapters; architecture identity is retained through checkpoints, resume, evaluation, and export. [Supported models](docs/models.md) |
 | Evaluation and model export | Loss/perplexity, sampling, and native Hugging Face model/tokenizer files. [How evaluation and export work](docs/implementation/export.md) |
 | Provenance-carrying checkpoints/exports | Versioned input/preparation/run/evaluation/artifact records, canonical identities, payload hashes, offline verification, and native HF export bundles. Adopters still provide policy/trust and interpret claims. [Implementation contract](docs/implementation/provenance.md) |
 
@@ -31,10 +33,10 @@ not established as complete**. [Evidence and artifact availability →](docs/exp
 | Direction | Proposed implementation |
 | --- | --- |
 | Optional provenance integrations | Extend the implemented offline contract with additional standards mappings and adopter-controlled registry publication. [Integration boundary](docs/implementation/sourcelume.md) |
-| CLI-selectable models | Support additional model architectures through explicit adapters/recipes, preserving evidence and recovery contracts. [Proposal](docs/roadmap/model-selection.md) |
+| More model architectures | Add explicit adapters for additional model families while preserving evidence and recovery contracts. [Supported models and roadmap](docs/models.md) · [Roadmap](docs/roadmap/model-selection.md) |
 | Federated training | Enable organizations to collaborate while retaining proprietary raw data locally, with an explicit privacy/threat model. [Proposal](docs/roadmap/federated-training.md) |
 
-Federated training and additional model selection remain proposed capabilities.
+Additional model families and federated training remain proposed capabilities.
 The provenance CLI is a working local feature; it does not publish implicitly.
 The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 

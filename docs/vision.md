@@ -33,7 +33,8 @@ code; the remaining mechanisms have [proposal write-ups](roadmap/README.md).
 Trashpanda should build on training frameworks, model implementations, tokenizer
 libraries, and interchange formats rather than replace them. Its intended value
 is the organization-facing workflow connecting approved inputs, model production,
-and portable evidence. Today it uses PyTorch and Transformers' Llama implementation.
+and portable evidence. Today it uses PyTorch and two explicit Transformers
+causal-LM adapters: Llama and tiny GPT-2.
 
 Likewise, it is not intended to replace a provenance standard or a registry.
 [Apache Sourcelume and OLMo](comparisons.md) address related concerns at different

@@ -10,7 +10,7 @@ governance protocol.
 | --- | --- | --- |
 | [Complete First Model](first-model.md) | Local Llama pipeline and bounded experiment records | Harden recovery/validation and deliver the actual full-budget run with independent durable artifacts |
 | [Model-bound provenance](provenance.md) | Versioned records, portable bundles, offline verify, adopter policy/signing, Sourcelume exchange | Extend optional adapters and retain explicit evidence/governance boundaries |
-| [Selectable models](model-selection.md) | Two fixed Llama recipes | Add explicit model adapters/selection without abandoning provenance and recovery contracts |
+| [Selectable models](model-selection.md) | Tiny Llama and GPT-2 selected with `--model`; [catalogue](../models.md) | Add more explicit model adapters without abandoning provenance and recovery contracts |
 | [Federated training](federated-training.md) | Single-machine training only | Design cross-organization training with local proprietary data, explicit threat model, and validated protections |
 
 ## Sequencing and decisions

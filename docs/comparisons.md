@@ -46,8 +46,8 @@ research releases rather than dismissing their transparency. OLMo's openness is
 valuable; whether a specific release satisfies an organization's policy still
 requires review of that release and its inputs.
 
-**Where we are today:** Trashpanda constructs Transformers Llama models; it neither
-uses OLMo as a dependency nor trains an OLMo recipe. OLMo could be evaluated as a
+**Where we are today:** Trashpanda constructs Transformers Llama and tiny GPT-2
+models; it neither uses OLMo as a dependency nor trains an OLMo recipe. OLMo could be evaluated as a
 future [model-selection](roadmap/model-selection.md) candidate, subject to
 architecture, tokenizer, licensing, export, and recovery validation. That is a
 proposal, not a supported CLI option or a promise to adopt OLMo-core.
@@ -58,7 +58,7 @@ proposal, not a supported CLI option or a promise to adopt OLMo-core.
 | --- | --- | --- |
 | Sourcelume Sample | Small executable demonstration of training-data provenance records and registry exchange | Reference for provenance integration; not something to dismiss as “just a toy model” |
 | OLMo / OLMo-core | Open model releases and modeling/training infrastructure | Relevant model ecosystem and transparency reference; not an implemented Trashpanda backend |
-| Trashpanda | Currently a small Llama training pipeline; intended to become an organizational model-production and supply-chain assurance workflow | Reuse frameworks and standards; implement the organization-specific evidence and approval workflow |
+| Trashpanda | Currently a small Llama/GPT-2 training pipeline; intended to become an organizational model-production and supply-chain assurance workflow | Reuse frameworks and standards; implement the organization-specific evidence and approval workflow |
 
 ## Sources and scope
 
