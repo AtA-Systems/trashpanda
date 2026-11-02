@@ -30,7 +30,7 @@ not established as complete**. [Evidence and artifact availability →](docs/exp
 
 | Direction | Proposed implementation |
 | --- | --- |
-| Provenance that travels with the model | Core record/bundle workflow is implemented; optional standards mapping and registry publication remain explicit adapters. [Contract and limitations](docs/implementation/provenance.md) |
+| Optional provenance integrations | Extend the implemented offline contract with additional standards mappings and adopter-controlled registry publication. [Integration boundary](docs/implementation/sourcelume.md) |
 | CLI-selectable models | Support additional model architectures through explicit adapters/recipes, preserving evidence and recovery contracts. [Proposal](docs/roadmap/model-selection.md) |
 | Federated training | Enable organizations to collaborate while retaining proprietary raw data locally, with an explicit privacy/threat model. [Proposal](docs/roadmap/federated-training.md) |
 
@@ -41,8 +41,9 @@ The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 ## Where Trashpanda fits
 
 - **Apache Sourcelume Sample** demonstrates training-data provenance records and
-  registry exchange. Trashpanda aims to apply such evidence to an organizational
-  model-production workflow; Sourcelume compatibility is a proposal, not an integration.
+  registry exchange. Trashpanda includes an optional, explicitly invoked
+  Sourcelume exchange adapter; local provenance and verification remain
+  independent of any registry.
 - **OLMo / OLMo-core** provide open models and research training infrastructure.
   Trashpanda's intended focus is the organization's approved inputs and evidence
   for *its* model, rather than another model family or general training framework.
