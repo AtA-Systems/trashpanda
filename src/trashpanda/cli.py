@@ -7,7 +7,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .config import get_recipe, load_config, resolve_training_config
+from dataclasses import replace
+
+from .config import MODEL_ARCHITECTURES, load_config, model_recipe, resolve_training_config
 from .data import SequenceReader
 from .prepare import prepare_splits
 from .provenance import inspect_bundle, load_policy, verify_bundle
@@ -15,7 +17,7 @@ from .tokenizer import TinyWordLevelTokenizer, load_tokenizer
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="trashpanda", description="Deterministic Llama training")
+    parser = argparse.ArgumentParser(prog="trashpanda", description="Deterministic CPU/GPU causal-LM training")
     commands = parser.add_subparsers(dest="command", required=True)
 
     prepare = commands.add_parser("prepare", help="prepare train/validation JSONL into uint16 shards")
@@ -23,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--validation", type=Path, action="append", required=True)
     prepare.add_argument("--output", type=Path, required=True)
     prepare.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
+    prepare.add_argument("--model", choices=MODEL_ARCHITECTURES, default="llama")
     prepare.add_argument("--tokenizer")
     prepare.add_argument("--revision")
     prepare.add_argument("--text-field", default="text")
@@ -31,7 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     train = commands.add_parser("train", help="token-budgeted training")
     train.add_argument("--data", type=Path)
-    train.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
+    train.add_argument("--recipe", choices=("tiny", "300m-a100"), default=None)
+    train.add_argument("--model", choices=MODEL_ARCHITECTURES, default=None)
     train.add_argument("--output", type=Path)
     train.add_argument("--tokens", type=int)
     train.add_argument("--microbatch-size", type=int)
@@ -58,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--seed", type=int, default=0)
     sample.add_argument("--device", default="cpu")
 
-    export = commands.add_parser("export", help="export native HF Llama files")
+    export = commands.add_parser("export", help="export native Hugging Face model files")
     export.add_argument("--checkpoint", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument("--tokenizer")
@@ -66,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = commands.add_parser("show-config", help="print a resolved recipe")
     show.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
+    show.add_argument("--model", choices=MODEL_ARCHITECTURES, default="llama")
     show.add_argument("--config", type=Path)
 
     provenance = commands.add_parser("provenance", help="inspect or verify an offline provenance bundle")
@@ -89,10 +94,31 @@ def _tokenizer_for(config: Any, explicit: str | None = None, *, allow_download: 
 
 def _checkpoint_config(checkpoint: Path) -> Any:
     import torch
+    from .checkpoint import _register_safe_checkpoint_globals
     from .config import config_from_dict
 
+    _register_safe_checkpoint_globals()
     raw = torch.load(checkpoint, map_location="cpu", weights_only=True)
     return config_from_dict(raw["config"])
+
+
+def _latest_checkpoint(path: Path) -> Path:
+    if path.is_dir():
+        from .checkpoint import list_checkpoints
+
+        checkpoints = list_checkpoints(path)
+        if not checkpoints:
+            raise FileNotFoundError(f"no checkpoints found in {path}")
+        return checkpoints[-1]
+    return path
+
+
+def _with_model(config: Any, architecture: str) -> Any:
+    if architecture not in MODEL_ARCHITECTURES:
+        raise ValueError(f"unsupported model architecture {architecture!r}")
+    if architecture == "gpt2" and config.recipe_name != "tiny":
+        raise ValueError("gpt2 only supports the tiny recipe")
+    return replace(config, model=replace(config.model, architecture=architecture))
 
 
 def _checkpoint_model(checkpoint: Path) -> tuple[Any, Any, Any]:
@@ -155,11 +181,12 @@ def _main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     if args.command == "show-config":
-        print(json.dumps((load_config(args.recipe, config_json=args.config)).to_dict(), sort_keys=True, indent=2))
+        config = load_config(args.recipe, config_json=args.config)
+        print(json.dumps(_with_model(config, args.model).to_dict(), sort_keys=True, indent=2))
         return 0
 
     if args.command == "prepare":
-        config = get_recipe(args.recipe)
+        config = model_recipe(args.recipe, args.model)
         tokenizer = _tokenizer_for(config, args.tokenizer)
         result = prepare_splits(
             args.output,
@@ -178,7 +205,20 @@ def _main(argv: list[str] | None = None) -> int:
     if args.command == "train":
         if args.resume is None and (args.data is None or args.output is None):
             raise SystemExit("new train requires --data and --output")
-        config = load_config(args.recipe, config_json=args.config)
+        if args.resume is not None:
+            saved_config = _checkpoint_config(_latest_checkpoint(args.resume))
+            if args.model is not None and saved_config.model.architecture != args.model:
+                raise ValueError(
+                    f"resume checkpoint uses {saved_config.model.architecture}, but --model selects {args.model}"
+                )
+            if args.recipe is not None and saved_config.recipe_name != args.recipe:
+                raise ValueError(
+                    f"resume checkpoint uses recipe {saved_config.recipe_name!r}, but --recipe selects {args.recipe!r}"
+                )
+            config = saved_config
+        else:
+            config = load_config(args.recipe or "tiny", config_json=args.config)
+            config = _with_model(config, args.model or "llama")
         config = resolve_training_config(
             config,
             token_budget=args.tokens,

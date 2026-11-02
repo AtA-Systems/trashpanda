@@ -1,4 +1,4 @@
-"""Native Hugging Face Llama export without custom code or remote execution."""
+"""Native Hugging Face model export without custom code or remote execution."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,10 +36,11 @@ def export_hf(
     provenance: Mapping[str, Any] | None = None,
     write_manifest: bool = True,
 ) -> Path:
-    """Call the real HF ``save_pretrained`` path for a LlamaForCausalLM."""
+    """Call the real HF ``save_pretrained`` path for the selected adapter."""
     _require_torch()
-    if not hasattr(model, "save_pretrained") or model.__class__.__name__ != "LlamaForCausalLM":
-        raise TypeError("export_hf requires transformers.LlamaForCausalLM")
+    expected_class = {"llama": "LlamaForCausalLM", "gpt2": "GPT2LMHeadModel"}[config.model.architecture]
+    if not hasattr(model, "save_pretrained") or model.__class__.__name__ != expected_class:
+        raise TypeError(f"export_hf requires the selected {config.model.architecture} model ({expected_class})")
     output = Path(output_dir)
     if output.exists():
         raise FileExistsError(f"export output {output} already exists; refusing to overwrite")

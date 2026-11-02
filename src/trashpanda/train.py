@@ -325,6 +325,19 @@ def train(
     prior_provenance: Mapping[str, Any] | None = None
     if resume:
         resume_path = _latest_checkpoint(resume)
+        # Inspect the immutable configuration before applying any saved model,
+        # optimizer, scheduler, or RNG state. Legacy checkpoints omitted the
+        # architecture field and are defined to mean Llama.
+        saved_metadata = torch.load(resume_path, map_location="cpu", weights_only=True)
+        if not isinstance(saved_metadata, Mapping):
+            raise ValueError("checkpoint metadata is not a mapping")
+        saved_config = saved_metadata.get("config", {})
+        saved_model = dict(saved_config.get("model", {})) if isinstance(saved_config, Mapping) else {}
+        saved_model.setdefault("architecture", "llama")
+        expected_model = config.to_dict()["model"]
+        if saved_model != expected_model:
+            raise ValueError("checkpoint model configuration does not match current recipe")
+        del saved_metadata
         payload = load_checkpoint(resume_path, model=model, optimizer=optimizer, map_location=str(device))
         resume_payload = payload
         state = TrainingState.from_dict(payload["state"])
@@ -338,7 +351,9 @@ def train(
         if payload.get("rng"):
             restore_rng_state(payload["rng"])
         saved_config = payload.get("config", {})
-        if saved_config.get("model") != config.to_dict()["model"] or saved_config.get("training") != config.to_dict()["training"]:
+        normalized_saved_model = dict(saved_config.get("model", {})) if isinstance(saved_config, Mapping) else {}
+        normalized_saved_model.setdefault("architecture", "llama")
+        if normalized_saved_model != config.to_dict()["model"] or saved_config.get("training") != config.to_dict()["training"]:
             raise ValueError("checkpoint model/training configuration does not match current recipe")
 
     destination = Path(checkpoint_dir or config.runtime.checkpoint_dir or config.runtime.output_dir)

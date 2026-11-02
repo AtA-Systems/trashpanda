@@ -10,7 +10,7 @@ organization-facing product, not the complete Trashpanda vision.
 
 ## Existing foundation
 
-The code has preparation, fixed Llama recipes, a token-budgeted optimizer loop,
+The code has preparation, fixed Llama recipes plus a tiny GPT-2 adapter, a token-budgeted optimizer loop,
 checkpoint state, evaluation/sampling, and export. Historical A100 records are
 bounded benchmarks, not evidence that the full 6B-target run has completed.
 See the [implementation map](../implementation/README.md) and

@@ -20,6 +20,7 @@ MISTRAL_TOKENIZER_FILE_HASHES = {
 MISTRAL_TOKENIZER_HASHES = MISTRAL_TOKENIZER_FILE_HASHES
 MISTRAL_TOKENIZER_SHA256 = MISTRAL_TOKENIZER_FILE_HASHES["tokenizer.json"]
 MISTRAL_TOKENIZER_FILES_SHA256 = MISTRAL_TOKENIZER_FILE_HASHES
+MODEL_ARCHITECTURES = ("llama", "gpt2")
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ModelConfig:
     num_key_value_heads: int | None = None
     rms_norm_eps: float = 1e-5
     tie_embeddings: bool = True
+    architecture: str = "llama"
 
     def __post_init__(self) -> None:
         for name in ("vocab_size", "num_layers", "hidden_size", "intermediate_size", "context_length", "num_attention_heads"):
@@ -46,18 +48,31 @@ class ModelConfig:
                 raise ValueError("invalid model.num_key_value_heads")
         if self.rms_norm_eps <= 0 or not isinstance(self.tie_embeddings, bool):
             raise ValueError("invalid model normalization or tying setting")
+        if self.architecture not in MODEL_ARCHITECTURES:
+            raise ValueError(f"unsupported model architecture {self.architecture!r}; choose {', '.join(MODEL_ARCHITECTURES)}")
 
     @property
     def kv_heads(self) -> int:
         return self.num_key_value_heads or self.num_attention_heads
 
     def parameter_count(self) -> int:
-        """The tied, bias-free Llama parameter count (without allocating weights)."""
+        """Count unique trainable parameters for the selected HF architecture."""
         h = self.hidden_size
+        if self.architecture == "gpt2":
+            # GPT-2 uses learned position embeddings and bias terms throughout.
+            # The LM head is tied to the token embedding when requested.
+            block = 4 * h * h + 2 * h * self.intermediate_size + 9 * h + self.intermediate_size
+            output = self.vocab_size * h + self.context_length * h + 2 * h
+            if not self.tie_embeddings:
+                output += self.vocab_size * h
+            return output + self.num_layers * block
         head_dim = h // self.num_attention_heads
         attention = h * h + 2 * (self.kv_heads * head_dim) * h + h * h
         mlp = 3 * h * self.intermediate_size
-        return self.vocab_size * h + self.num_layers * (attention + mlp + 2 * h) + h
+        output = self.vocab_size * h + self.num_layers * (attention + mlp + 2 * h) + h
+        if not self.tie_embeddings:
+            output += self.vocab_size * h
+        return output
 
 
 @dataclass(frozen=True)
@@ -263,7 +278,7 @@ def _recipes() -> dict[str, Config]:
     return {
         "tiny": Config(
             recipe_name="tiny",
-            model=ModelConfig(vocab_size=32, num_layers=2, hidden_size=32, intermediate_size=64, context_length=32, num_attention_heads=4),
+            model=ModelConfig(vocab_size=32, num_layers=2, hidden_size=32, intermediate_size=64, context_length=32, num_attention_heads=4, architecture="llama"),
             data=DataConfig(tokenizer_name="trashpanda/tiny-wordlevel", tokenizer_revision="project"),
             training=TrainingConfig(batch_size=4, microbatch_size=2, token_budget=744, checkpoint_interval=3, precision="fp32", device="cpu", learning_rate=0.001, warmup_steps=0, min_lr_ratio=0.1, seed=42, repeat_data=True),
             runtime=RuntimeConfig(output_dir="runs/tiny"),
@@ -278,6 +293,16 @@ def _recipes() -> dict[str, Config]:
     }
 
 
+def model_recipe(name: str, architecture: str = "llama") -> Config:
+    """Return a supported recipe with an explicitly selected architecture."""
+    if architecture not in MODEL_ARCHITECTURES:
+        raise ValueError(f"unsupported model architecture {architecture!r}; choose {', '.join(MODEL_ARCHITECTURES)}")
+    base = get_recipe(name)
+    if architecture == "gpt2" and name != "tiny":
+        raise ValueError("gpt2 only supports the tiny recipe")
+    return replace(base, model=replace(base.model, architecture=architecture))
+
+
 def get_recipe(name: str) -> Config:
     try:
         return _recipes()[name]
@@ -290,8 +315,9 @@ load_recipe = get_recipe
 
 __all__ = [
     "Config", "DataConfig", "ModelConfig", "RuntimeConfig", "TrainingConfig",
+    "MODEL_ARCHITECTURES",
     "TRAINING_OVERRIDE_KEYS", "MISTRAL_TOKENIZER_FILE_HASHES", "MISTRAL_TOKENIZER_HASHES",
     "MISTRAL_TOKENIZER_NAME", "MISTRAL_TOKENIZER_REVISION", "MISTRAL_TOKENIZER_SHA256",
     "apply_overrides", "config_from_dict", "get_recipe", "load_config", "load_recipe",
-    "recipe", "resolve_training_config",
+    "recipe", "resolve_training_config", "model_recipe",
 ]

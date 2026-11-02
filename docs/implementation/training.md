@@ -4,10 +4,11 @@
 
 ## Model and update loop
 
-Both recipes construct Transformers' `LlamaForCausalLM` from random initialization,
-with tied embeddings and SDPA. They do not load a pretrained model. `tiny` and
-`300m-a100` are fixed configurations of the same architecture, not different model
-families. Source: [`model.py`](../../src/trashpanda/model.py),
+The supported adapters construct Transformers causal-LM classes from random
+initialization; they do not load pretrained models. `tiny` defaults to
+`LlamaForCausalLM`, while `--model gpt2` selects `GPT2LMHeadModel` for the tiny
+recipe. `300m-a100` remains the fixed Llama recipe. Source:
+[`model.py`](../../src/trashpanda/model.py),
 [`config.py`](../../src/trashpanda/config.py).
 
 | Setting | tiny | 300m-a100 |
@@ -32,7 +33,8 @@ passes—not 6B unique source tokens.
 
 `--config` accepts only `token_budget`, `microbatch_size`, `learning_rate`, and
 `repeat_data`. See [`config.py`](../../src/trashpanda/config.py) for constraints.
-Current CLI defaults to `tiny`; select the production recipe explicitly.
+Current CLI defaults to the tiny Llama recipe; select `--model gpt2` for the tiny
+GPT-2 adapter or select the production recipe explicitly.
 
 ## What a normal checkpoint stores
 

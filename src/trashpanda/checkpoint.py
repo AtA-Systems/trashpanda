@@ -23,6 +23,19 @@ except ImportError:  # pragma: no cover
 CHECKPOINT_VERSION = 1
 
 
+def _register_safe_checkpoint_globals() -> None:
+    """Allow PyTorch's own version marker in weights-only checkpoint loads."""
+    if torch is None:
+        return
+    register = getattr(torch.serialization, "add_safe_globals", None)
+    version_type = getattr(getattr(torch, "torch_version", None), "TorchVersion", None)
+    if register is not None and version_type is not None:
+        register([version_type])
+
+
+_register_safe_checkpoint_globals()
+
+
 @dataclass
 class TrainingState:
     update_step: int = 0
@@ -223,6 +236,7 @@ def save_training_state(
 
 def load_checkpoint(path: str | Path, *, model: Any, optimizer: Any | None = None, map_location: str = "cpu") -> dict[str, Any]:
     _require_torch()
+    _register_safe_checkpoint_globals()
     checkpoint = Path(path)
     payload = torch.load(checkpoint, map_location=map_location, weights_only=True)
     if not isinstance(payload, dict) or payload.get("format") not in {"trashpanda.checkpoint.v1", "trashpanda.checkpoint.bundle.v1"}:

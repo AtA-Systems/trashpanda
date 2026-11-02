@@ -1,4 +1,4 @@
-from trashpanda.config import get_recipe, load_config, resolve_training_config
+from trashpanda.config import config_from_dict, get_recipe, load_config, model_recipe, resolve_training_config
 
 
 def test_fixed_recipes():
@@ -27,3 +27,21 @@ def test_strict_flat_overrides_and_precedence():
         assert "only allow" in str(exc)
     else:
         raise AssertionError("nested or unknown config keys must be rejected")
+
+
+def test_model_selection_is_explicit_and_round_trips():
+    gpt2 = model_recipe("tiny", "gpt2")
+    assert gpt2.model.architecture == "gpt2"
+    assert gpt2.model.parameter_count() == 19_200
+    assert config_from_dict(gpt2.to_dict()).model.architecture == "gpt2"
+    legacy = {
+        **gpt2.to_dict(),
+        "model": {key: value for key, value in gpt2.to_dict()["model"].items() if key != "architecture"},
+    }
+    assert config_from_dict(legacy).model.architecture == "llama"
+    try:
+        model_recipe("300m-a100", "gpt2")
+    except ValueError as exc:
+        assert "only supports" in str(exc)
+    else:
+        raise AssertionError("GPT-2 must reject the production Llama recipe")

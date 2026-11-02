@@ -67,6 +67,20 @@ recipe's six updates / 744 prediction targets. Both use the same data, recipe,
 and settings. The explicit output path is important: the current CLI otherwise
 reuses the resume path as its output directory, which is invalid for a file path.
 
+The same fixture can use the second supported architecture. GPT-2 currently
+supports the tiny recipe only; when resuming, the checkpoint supplies the model
+identity, so `--model` is not required on the second command:
+
+```bash
+python -m trashpanda prepare --model gpt2 --recipe tiny \
+  --train "$DEMO/train.jsonl" --validation "$DEMO/validation.jsonl" \
+  --output "$DEMO/prepared-gpt2"
+python -m trashpanda train --model gpt2 --recipe tiny \
+  --data "$DEMO/prepared-gpt2" --output "$DEMO/run-gpt2" --max-steps 3
+python -m trashpanda train --data "$DEMO/prepared-gpt2" \
+  --output "$DEMO/run-gpt2" --resume "$DEMO/run-gpt2/checkpoint-00000003.pt"
+```
+
 This exercises process restart, not independently durable machine-loss recovery.
 See [recovery limitations](implementation/training.md) before relying on it.
 
