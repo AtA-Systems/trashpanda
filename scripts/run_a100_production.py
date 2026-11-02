@@ -8,7 +8,7 @@ sys.path.insert(0,str(ROOT/'src'))
 from trashpanda.cli import _tokenizer_from_prepared
 from trashpanda.config import get_recipe
 from trashpanda.data import SequenceReader
-from trashpanda.evaluate import evaluate, sample_text
+from trashpanda.evaluate import evaluate, evaluation_record, sample_text
 from trashpanda.export import export_hf
 from trashpanda.train import train
 
@@ -26,9 +26,13 @@ def main():
  if not prepared.is_dir(): p.error(f'missing prepared data: {prepared}')
  tok=_tokenizer_from_prepared(prepared,config); train_data=SequenceReader(prepared,split='train',verify_hash=True); start=time.time()
  result=train(config,train_data,tokenizer=tok,checkpoint_dir=root/'checkpoints',resume=a.resume,max_steps=a.max_steps)
- evaluation=evaluate(result.model,SequenceReader(prepared,split='validation',verify_hash=True),batch_size=8,device='cuda')
+ validation_data=SequenceReader(prepared,split='validation',verify_hash=True)
+ evaluation=evaluate(result.model,validation_data,batch_size=8,device='cuda')
+ evaluation_provenance=evaluation_record(evaluation,split='validation',settings={'batch_size':8,'device':'cuda'},input_identity=validation_data.manifest.get('identity'))
  prompt='The future of education is'; samples=[{'seed':s,'prompt':prompt,'text':sample_text(result.model,tok,prompt,max_new_tokens=32,temperature=.8,top_k=50,seed=s,device='cuda')} for s in range(5)]
- export=root/'export'; export_hf(result.model.to('cpu'),export,config=config,tokenizer=tok)
- meta={'recipe':config.recipe_name,'dataset':'HuggingFaceFW/fineweb-edu','dataset_config':'sample-10BT','checkpoint':str(result.checkpoint),'checkpoint_step':result.state.update_step,'consumed_tokens':result.state.consumed_tokens,'resumed_from':str(a.resume) if a.resume else None,'parameter_count':config.parameter_count,'elapsed_seconds':time.time()-start,'evaluation':evaluation.__dict__,'samples':samples,'export':str(export)}
+ export=root/'export'; export_hf(result.model.to('cpu'),export,config=config,tokenizer=tok,provenance={'records':[evaluation_provenance]})
+ prepared_manifest=train_data.manifest
+ source_records=prepared_manifest.get('provenance',{}).get('records',[])
+ meta={'recipe':config.recipe_name,'dataset':source_records,'checkpoint':str(result.checkpoint),'checkpoint_step':result.state.update_step,'consumed_tokens':result.state.consumed_tokens,'resumed_from':str(a.resume) if a.resume else None,'parameter_count':config.parameter_count,'elapsed_seconds':time.time()-start,'evaluation':evaluation.__dict__,'evaluation_provenance':evaluation_provenance,'samples':samples,'export':str(export)}
  root.mkdir(parents=True,exist_ok=True); (root/'run-metadata.json').write_text(json.dumps(meta,sort_keys=True,indent=2)+'\n'); print(json.dumps(meta,sort_keys=True,indent=2))
 if __name__=='__main__': main()

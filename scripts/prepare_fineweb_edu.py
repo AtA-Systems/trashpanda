@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu")
     parser.add_argument("--config", default="sample-10BT")
     parser.add_argument("--split", default="train")
+    parser.add_argument("--revision", help="immutable dataset revision; omitted means the adapter records unknown")
     parser.add_argument("--text-field", default="text")
     parser.add_argument("--train-documents", type=int, default=30_000)
     parser.add_argument("--validation-documents", type=int, default=1_000)
@@ -39,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as exc:
         raise SystemExit("install the optional datasets dependency for FineWeb-Edu preparation") from exc
 
-    dataset = load_dataset(args.dataset, name=args.config, split=args.split, streaming=True)
+    dataset = load_dataset(args.dataset, name=args.config, split=args.split, revision=args.revision, streaming=True)
+    resolved_revision = args.revision or getattr(dataset, "_fingerprint", None) or "unknown"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="fineweb-jsonl-", dir=args.output.parent) as temp:
         train_path = Path(temp) / "train.jsonl"
@@ -76,8 +78,34 @@ def main(argv: list[str] | None = None) -> int:
             context_length=config.model.context_length,
             vocab_size=config.model.vocab_size,
             text_field="text",
+            source_descriptors=[
+                {
+                    "source_id": f"hf:{args.dataset}:{args.config}:{resolved_revision}:train",
+                    "source": args.dataset,
+                    "source_revision": {"requested": args.revision, "resolved": resolved_revision},
+                    "selection": {
+                        "split": args.split,
+                        "train_documents": args.train_documents,
+                        "validation_documents": args.validation_documents,
+                        "text_field": args.text_field,
+                    },
+                    "evidence_state": "observed" if args.revision else "revision-unavailable",
+                },
+                {
+                    "source_id": f"hf:{args.dataset}:{args.config}:{resolved_revision}:validation",
+                    "source": args.dataset,
+                    "source_revision": {"requested": args.revision, "resolved": resolved_revision},
+                    "selection": {
+                        "split": args.split,
+                        "train_documents": args.train_documents,
+                        "validation_documents": args.validation_documents,
+                        "text_field": args.text_field,
+                    },
+                    "evidence_state": "observed" if args.revision else "revision-unavailable",
+                },
+            ],
         )
-    print(json.dumps({"dataset": args.dataset, "train_documents": train_count, "validation_documents": validation_count, **{key: value.to_dict() for key, value in prepared.items()}}, sort_keys=True, indent=2))
+    print(json.dumps({"dataset": args.dataset, "requested_revision": args.revision, "resolved_revision": resolved_revision, "train_documents": train_count, "validation_documents": validation_count, **{key: value.to_dict() for key, value in prepared.items()}}, sort_keys=True, indent=2))
     return 0
 
 

@@ -17,8 +17,26 @@ license-check, approve, or anonymize the data. Whitespace-only strings are prese
 
 It writes little-endian uint16 shards, a tokenizer directory, and `manifest.json`.
 The manifest records token/sequence counts, dropped tails, context/vocabulary,
-tokenizer metadata, saved tokenizer-file hashes, shard hashes, and an identity
-hash of the manifest content before the identity field is added.
+tokenizer metadata, saved tokenizer-file hashes, shard hashes, an identity hash,
+and versioned input/preparation records. Pass `source_descriptors` to retain a
+stable source ID, actual acquired JSONL digest, requested/resolved revision,
+selection, terms, and explicit unknown evidence states. No absolute path or
+source text is required for the logical identity.
+
+The CLI accepts the same fields through one JSON file per input:
+
+```json
+{"source_id":"synthetic:A","source":"project-owned-fixture","source_revision":"fixture-1","selection":{"kind":"all-records"},"terms":"synthetic-only","evidence_state":"observed"}
+```
+
+Pass them in input order with repeated `--source-descriptor` options. Omitting a
+descriptor records a content-derived local ID and explicit unknown metadata.
+
+For mixed local inputs, preparation also writes compact prediction-target ranges.
+`SequenceReader.target_source_counts(indices)` returns per-source counts for the
+sampled rows. Counts use the source of each target token, exclude each sequence's
+first context token, include repeated sampling only when the caller samples a row
+again, and keep dropped tails separate.
 
 [`SequenceReader`](../../src/trashpanda/data.py) checks shard sizes and SHA-256s by
 default and memory-maps sequences. A length-L row yields `row[:-1]` inputs and
@@ -47,16 +65,17 @@ the same preparation path. Defaults select the first 30,000 training documents
 and the next 1,000 validation documents. This is a bounded experiment, not a data
 approval decision or a representative production corpus guarantee.
 
-The adapter currently does not pin the dataset revision or retain a complete source
-record. A Hugging Face listing alone does not establish rights to every underlying
-record. Use your own review process before adopting this or any other dataset.
+Pass `--revision` to pin a requested immutable dataset revision. The adapter
+persists both requested and resolved values and records `unknown` when the
+streaming backend cannot expose a resolved revision. The acquired temporary
+JSONL bytes are still hashed before deletion. A Hugging Face listing alone does
+not establish rights to every underlying record; use your own review process.
 
 ## Current limitations
 
-Manifest identity is written but not recomputed by `read_manifest()`, and checkpoint
-resume does not bind the prepared-data identity to the run. Source JSONL hashes,
-dataset terms/approvals, immutable dataset versions, and acquisition timestamps
-are not captured as an end-to-end record. Preparation also reads all shard bytes
-again to compute a split-wide digest, so it is not fully bounded-memory at that stage.
+Preparation verifies manifest, shard, and tokenizer-file identities on read.
+Terms, approvals, and acquisition times remain adopter-supplied observations;
+unknown values are not fabricated. The split-wide compatibility digest remains
+for existing callers, while per-file provenance hashes stream in bounded chunks.
 
 See the [provenance proposal](../roadmap/provenance.md) for the intended extension.

@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover
 from .checkpoint import load_checkpoint
 from .config import Config, config_from_dict
 from .model import build_model
+from .provenance import build_bundle_manifest, make_record, sha256_file
 from .tokenizer import TinyWordLevelTokenizer, load_tokenizer
 
 
@@ -26,7 +27,15 @@ def _config_from_dict(value: Mapping[str, Any]) -> Config:
     return config_from_dict(value)
 
 
-def export_hf(model: Any, output_dir: str | Path, *, config: Config, tokenizer: Any | None = None) -> Path:
+def export_hf(
+    model: Any,
+    output_dir: str | Path,
+    *,
+    config: Config,
+    tokenizer: Any | None = None,
+    provenance: Mapping[str, Any] | None = None,
+    write_manifest: bool = True,
+) -> Path:
     """Call the real HF ``save_pretrained`` path for a LlamaForCausalLM."""
     _require_torch()
     if not hasattr(model, "save_pretrained") or model.__class__.__name__ != "LlamaForCausalLM":
@@ -42,6 +51,20 @@ def export_hf(model: Any, output_dir: str | Path, *, config: Config, tokenizer: 
     if tokenizer is None or not hasattr(tokenizer, "save_pretrained"):
         raise ValueError("production export requires the locally cached Mistral tokenizer")
     tokenizer.save_pretrained(output)
+    if write_manifest:
+        records = [dict(record) for record in (provenance or {}).get("records", []) if isinstance(record, Mapping)]
+        records.append(
+            make_record(
+                "artifact",
+                {
+                    "artifact_type": "hf-export",
+                    "initialization": "unknown",
+                    "config_sha256": sha256_file(output / "config.json"),
+                    "evidence_state": "incomplete-direct-export",
+                },
+            )
+        )
+        build_bundle_manifest(output, records=records, artifact_type="hf-export")
     return output
 
 
@@ -77,7 +100,31 @@ def export_checkpoint(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
             tokenizer = load_tokenizer(str(snapshot_dir), revision=config.data.tokenizer_revision, vocab_size=config.model.vocab_size, local_files_only=True)
-    exported = export_hf(model, output_dir, config=config, tokenizer=tokenizer)
+    provenance_records = []
+    if isinstance(raw.get("extra"), Mapping):
+        provenance_records.extend(
+            record for record in raw["extra"].get("provenance", {}).get("records", [])
+            if isinstance(record, Mapping)
+        )
+    provenance_records.append(
+        make_record(
+            "artifact",
+            {
+                "artifact_type": "hf-export",
+                "source_checkpoint_sha256": sha256_file(checkpoint),
+                "derived_by": "export",
+                "evidence_state": "observed",
+            },
+        )
+    )
+    exported = export_hf(
+        model,
+        output_dir,
+        config=config,
+        tokenizer=tokenizer,
+        provenance={"records": provenance_records},
+        write_manifest=False,
+    )
     provenance = {
         "format": "trashpanda.export.provenance.v1",
         "checkpoint": str(Path(checkpoint).name),
@@ -85,8 +132,15 @@ def export_checkpoint(
         "config": raw.get("config"),
         "tokenizer": raw.get("tokenizer"),
         "checkpoint_format": raw.get("format"),
+        "source_checkpoint_sha256": sha256_file(checkpoint),
     }
     (exported / "trashpanda-provenance.json").write_text(json.dumps(provenance, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    build_bundle_manifest(
+        exported,
+        records=provenance_records,
+        artifact_type="hf-export",
+        source_checkpoint_sha256=sha256_file(checkpoint),
+    )
     return exported
 
 

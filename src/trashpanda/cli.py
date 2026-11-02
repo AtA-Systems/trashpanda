@@ -10,6 +10,7 @@ from typing import Any
 from .config import get_recipe, load_config, resolve_training_config
 from .data import SequenceReader
 from .prepare import prepare_splits
+from .provenance import inspect_bundle, load_policy, verify_bundle
 from .tokenizer import TinyWordLevelTokenizer, load_tokenizer
 
 
@@ -26,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--revision")
     prepare.add_argument("--text-field", default="text")
     prepare.add_argument("--shard-tokens", type=int, default=1 << 20)
+    prepare.add_argument("--source-descriptor", type=Path, action="append", help="JSON object, one per --train/--validation input; records source_id, revision, selection, terms, and evidence_state")
 
     train = commands.add_parser("train", help="token-budgeted training")
     train.add_argument("--data", type=Path)
@@ -37,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--resume", type=Path)
     train.add_argument("--config", type=Path, help="strict flat JSON override file")
     train.add_argument("--max-steps", type=int)
+    train.add_argument("--policy", type=Path, help="adopter policy JSON to evaluate before optimizer work")
 
     evaluate = commands.add_parser("evaluate", help="evaluate a checkpoint")
     evaluate.add_argument("--checkpoint", type=Path, required=True)
@@ -64,6 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
     show = commands.add_parser("show-config", help="print a resolved recipe")
     show.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
     show.add_argument("--config", type=Path)
+
+    provenance = commands.add_parser("provenance", help="inspect or verify an offline provenance bundle")
+    provenance_commands = provenance.add_subparsers(dest="provenance_command", required=True)
+    inspect = provenance_commands.add_parser("inspect", help="read provenance without loading model weights")
+    inspect.add_argument("path", type=Path)
+    inspect.add_argument("--json", action="store_true", help="emit stable JSON")
+    verify = provenance_commands.add_parser("verify", help="verify payload hashes and evidence references offline")
+    verify.add_argument("path", type=Path)
+    verify.add_argument("--policy", type=Path, help="optional adopter policy JSON")
+    verify.add_argument("--strict", action="store_true", help="fail incomplete or unevaluated optional evidence")
+    verify.add_argument("--json", action="store_true", help="emit stable JSON")
     return parser
 
 
@@ -115,6 +129,31 @@ def _reader(path: Path, split: str) -> SequenceReader:
 
 def _main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "provenance":
+        if args.provenance_command == "inspect":
+            result = inspect_bundle(args.path)
+            if args.json:
+                print(json.dumps(result, sort_keys=True, indent=2))
+            else:
+                print(f"artifact: {result.get('artifact_id')}")
+                print(f"type: {result.get('artifact_type')}")
+                print(f"records: {len(result.get('records', []))}")
+                for record in result.get("records", []):
+                    print(f"- {record.get('type')}: {record.get('id')}")
+            return 0
+        policy = load_policy(args.policy) if args.policy else None
+        result = verify_bundle(args.path, policy=policy)
+        output = result.to_dict()
+        if args.json:
+            print(json.dumps(output, sort_keys=True, indent=2))
+        else:
+            for name in ("schema", "integrity", "completeness", "signatures", "policy"):
+                print(f"{name}: {output[name]['status']}")
+                for reason in output[name].get("reasons", []):
+                    print(f"  {reason.get('code', 'reason')}: {reason.get('message', reason)}")
+        if not result.ok or args.strict and (result.completeness["status"] != "complete" or result.policy.get("decision", "not_evaluated") == "not_evaluated"):
+            return 2
+        return 0
     if args.command == "show-config":
         print(json.dumps((load_config(args.recipe, config_json=args.config)).to_dict(), sort_keys=True, indent=2))
         return 0
@@ -131,6 +170,7 @@ def _main(argv: list[str] | None = None) -> int:
             vocab_size=config.model.vocab_size,
             text_field=args.text_field,
             shard_tokens=args.shard_tokens,
+            source_descriptors=[json.loads(path.read_text(encoding="utf-8")) for path in args.source_descriptor] if args.source_descriptor else None,
         )
         print(json.dumps({split: info.to_dict() for split, info in result.items()}, sort_keys=True, indent=2))
         return 0
@@ -154,7 +194,7 @@ def _main(argv: list[str] | None = None) -> int:
         tokenizer = _tokenizer_from_prepared(data_path, config)
         from .train import train as run_training
 
-        result = run_training(config, dataset, tokenizer=tokenizer, resume=args.resume, checkpoint_dir=args.output or args.resume, max_steps=args.max_steps)
+        result = run_training(config, dataset, tokenizer=tokenizer, resume=args.resume, checkpoint_dir=args.output or args.resume, max_steps=args.max_steps, policy=load_policy(args.policy) if args.policy else None)
         print(json.dumps({"state": result.state.to_dict(), "checkpoint": str(result.checkpoint), "device": result.device}, sort_keys=True))
         return 0
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import struct
 from typing import Any, Iterable, Mapping, Sequence
 
+from .provenance import make_record, sha256_file
 from .tokenizer import TinyWordLevelTokenizer, tokenizer_snapshot
 
 
@@ -87,6 +88,7 @@ def _write_split(
     vocab_size: int,
     text_field: str,
     shard_tokens: int,
+    source_ids: Mapping[Path, str],
 ) -> tuple[dict[str, Any], PreparedDatasetInfo]:
     max_sequences = max(1, shard_tokens // context_length)
     carry: list[int] = []
@@ -94,6 +96,11 @@ def _write_split(
     token_count = 0
     sequence_count = 0
     current: list[int] = []
+    carry_sources: list[str] = []
+    source_target_counts: dict[str, int] = {}
+    attribution_ranges: list[dict[str, Any]] = []
+    document_counts: dict[str, int] = {}
+    target_offset = 0
 
     def flush() -> None:
         nonlocal current
@@ -110,7 +117,11 @@ def _write_split(
 
     input_paths = [input_path] if isinstance(input_path, (str, Path)) else list(input_path)
     for source_path in input_paths:
+        source_path = Path(source_path)
+        source_id = source_ids[source_path.resolve()]
+        document_counts.setdefault(source_id, 0)
         for text in _iter_jsonl(source_path, text_field):
+            document_counts[source_id] += 1
             try:
                 encoded = [int(token) for token in tokenizer.encode(
                     text, add_special_tokens=False, split_special_tokens=True
@@ -127,10 +138,22 @@ def _write_split(
                 raise ValueError("tokenizer produced a token outside uint16 vocabulary")
             token_count += len(encoded)
             carry.extend(encoded)
+            carry_sources.extend([source_id] * len(encoded))
             while len(carry) >= context_length:
                 current.extend(carry[:context_length])
+                sequence_sources = carry_sources[:context_length]
                 del carry[:context_length]
+                del carry_sources[:context_length]
                 sequence_count += 1
+                target_sources = sequence_sources[1:]
+                range_start = target_offset
+                for source in target_sources:
+                    source_target_counts[source] = source_target_counts.get(source, 0) + 1
+                    if attribution_ranges and attribution_ranges[-1]["source_id"] == source and attribution_ranges[-1]["end"] == target_offset:
+                        attribution_ranges[-1]["end"] += 1
+                    else:
+                        attribution_ranges.append({"start": target_offset, "end": target_offset + 1, "source_id": source})
+                    target_offset += 1
                 if len(current) >= max_sequences * context_length:
                     flush()
     dropped = len(carry)
@@ -141,6 +164,13 @@ def _write_split(
         "sequence_count": sequence_count,
         "dropped_tokens": dropped,
         "training_token_count": sequence_count * (context_length - 1),
+        "source_document_counts": document_counts,
+        "source_target_counts": source_target_counts,
+        "attribution": {
+            "unit": "prediction-target",
+            "sequence_target_count": context_length - 1,
+            "ranges": attribution_ranges,
+        },
     }
     all_bytes = b"".join((output / shard["path"]).read_bytes() for shard in shards)
     info = PreparedDatasetInfo(
@@ -167,6 +197,7 @@ def prepare_splits(
     vocab_size: int | None = None,
     text_field: str = "text",
     shard_tokens: int = 1 << 20,
+    source_descriptors: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, PreparedDatasetInfo]:
     """Prepare train and optional validation without adding EOS or padding."""
     if context_length < 2 or shard_tokens <= 0:
@@ -183,6 +214,43 @@ def prepare_splits(
         validation_inputs = [validation_path] if isinstance(validation_path, (str, Path)) else list(validation_path)
         if {Path(item).resolve() for item in train_inputs} & {Path(item).resolve() for item in validation_inputs}:
             raise ValueError("train and validation inputs must be distinct paths")
+    all_inputs: list[Path] = []
+    for value in (train_path, validation_path):
+        if value is None:
+            continue
+        all_inputs.extend(Path(item).resolve() for item in ([value] if isinstance(value, (str, Path)) else list(value)))
+    descriptors: list[Mapping[str, Any]] = []
+    if source_descriptors is None:
+        descriptors = [{} for _ in all_inputs]
+    elif isinstance(source_descriptors, Mapping):
+        descriptors = [source_descriptors.get(str(path), source_descriptors.get(path.name, {})) for path in all_inputs]
+    else:
+        descriptors = list(source_descriptors)
+        if len(descriptors) != len(all_inputs):
+            raise ValueError("source_descriptors must have one entry per input file")
+    source_records: list[dict[str, Any]] = []
+    source_ids: dict[Path, str] = {}
+    descriptor_by_path: dict[Path, dict[str, Any]] = {}
+    for path, descriptor in zip(all_inputs, descriptors):
+        if not isinstance(descriptor, Mapping):
+            raise ValueError("each source descriptor must be an object")
+        content_sha256 = sha256_file(path)
+        source_id = str(descriptor.get("source_id") or f"local:{content_sha256}")
+        source_ids[path] = source_id
+        public_descriptor = {
+            "source_id": source_id,
+            "source": descriptor.get("source", "local-file"),
+            "content_sha256": content_sha256,
+            "content_size": path.stat().st_size,
+            "source_revision": descriptor.get("source_revision", "unknown"),
+            "selection": descriptor.get("selection", {"kind": "all-records"}),
+            "terms": descriptor.get("terms", "unknown"),
+            "evidence_state": descriptor.get("evidence_state", "unknown"),
+        }
+        if "acquired_at" in descriptor:
+            public_descriptor["acquired_at"] = descriptor["acquired_at"]
+        descriptor_by_path[path] = public_descriptor
+        source_records.append(make_record("input", public_descriptor))
     output.mkdir(parents=True, exist_ok=False)
     split_paths = {"train": train_path}
     if validation_path is not None:
@@ -210,12 +278,46 @@ def prepare_splits(
     }
     result: dict[str, PreparedDatasetInfo] = {}
     for split, path in split_paths.items():
-        split_manifest, info = _write_split(path, output, split, tokenizer, context_length=context_length, vocab_size=actual_vocab, text_field=text_field, shard_tokens=shard_tokens)
+        split_manifest, info = _write_split(
+            path,
+            output,
+            split,
+            tokenizer,
+            context_length=context_length,
+            vocab_size=actual_vocab,
+            text_field=text_field,
+            shard_tokens=shard_tokens,
+            source_ids=source_ids,
+        )
         if info.sequence_count < 1:
             raise ValueError(f"{split} split has no complete sequence of length {context_length}")
         manifest["splits"][split] = split_manifest
         manifest[split] = split_manifest
         result[split] = info
+    preparation_record = make_record(
+        "preparation",
+        {
+            "split": "train+validation" if validation_path is not None else "train",
+            "sources": [record["id"] for record in source_records],
+            "tokenizer": snapshot,
+            "settings": {
+                "text_field": text_field,
+                "context_length": context_length,
+                "vocab_size": actual_vocab,
+                "shard_tokens": shard_tokens,
+                "eos_behavior": "one explicit EOS per document",
+                "packing": "concatenate documents in source order and drop incomplete tail per split",
+            },
+            "splits": manifest["splits"],
+            "evidence_state": "observed",
+        },
+    )
+    manifest["provenance"] = {
+        "schema_version": "1.0",
+        "records": source_records + [preparation_record],
+        "record_ids": [record["id"] for record in source_records] + [preparation_record["id"]],
+        "preparation_record_id": preparation_record["id"],
+    }
     temporary = output / "manifest.json.tmp"
     manifest["identity"] = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
     temporary.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")

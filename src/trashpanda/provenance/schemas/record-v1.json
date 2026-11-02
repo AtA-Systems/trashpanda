@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trashpanda.local/schema/provenance/1.0/record.json",
+  "title": "Trashpanda provenance record",
+  "type": "object",
+  "required": ["format", "schema_version", "type", "id"],
+  "properties": {
+    "format": {"const": "trashpanda.provenance.record"},
+    "schema_version": {"const": "1.0"},
+    "type": {"enum": ["input", "preparation", "run", "execution_segment", "artifact", "evaluation", "claim", "policy_decision", "exchange"]},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}
