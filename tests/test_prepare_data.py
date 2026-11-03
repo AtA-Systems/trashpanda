@@ -4,6 +4,10 @@ from trashpanda.data import PCG64Sampler, SequenceReader
 from trashpanda.prepare import prepare_splits
 from trashpanda.tokenizer import TinyWordLevelTokenizer
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_prepare_reader_and_pcg64(tmp_path):
     text = " ".join(f"w{i % 29}" for i in range(17))

@@ -11,6 +11,8 @@ import torch
 
 from trashpanda.model import build_model, count_parameters
 
+pytestmark = pytest.mark.unit
+
 
 def test_tiny_model_shape_count_and_seed():
     config = get_recipe("tiny")

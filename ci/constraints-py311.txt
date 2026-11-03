@@ -1,0 +1,9 @@
+# Baseline CPU CI environment. Refresh deliberately and review the resulting
+# test evidence; this file is not a security or GPU compatibility lock.
+numpy==2.2.6
+torch==2.14.1
+transformers==5.20.2
+tokenizers==0.23.3
+safetensors==0.8.0
+pytest==9.0.2
+cryptography==46.0.3

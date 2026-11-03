@@ -1,4 +1,8 @@
+import pytest
+
 from trashpanda.train import TokenBudgetSchedule
+
+pytestmark = pytest.mark.unit
 
 
 def test_shifted_token_schedule():

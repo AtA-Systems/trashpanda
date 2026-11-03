@@ -19,6 +19,8 @@ from trashpanda.tokenizer import TinyWordLevelTokenizer
 from trashpanda.data import SequenceReader
 from trashpanda.cli import main
 
+pytestmark = pytest.mark.unit
+
 
 def _records():
     source = make_record(

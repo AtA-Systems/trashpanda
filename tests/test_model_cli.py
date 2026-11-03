@@ -4,6 +4,8 @@ import pytest
 
 from trashpanda.cli import _main, build_parser
 
+pytestmark = pytest.mark.unit
+
 
 def test_cli_exposes_model_selector():
     args = build_parser().parse_args(["show-config", "--model", "gpt2"])
