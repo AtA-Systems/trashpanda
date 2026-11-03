@@ -1,4 +1,7 @@
 # Byte-compiled / optimized / DLL files
+# Local agent workflow preferences
+/AGENTS.md
+
 __pycache__/
 *.py[codz]
 *$py.class
