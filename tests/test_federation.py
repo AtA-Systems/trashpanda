@@ -12,6 +12,8 @@ from trashpanda.federation.runner import make_demo_config, run_federation
 from trashpanda.federation.provenance import export_federation
 from trashpanda.provenance import verify_bundle
 
+pytestmark = pytest.mark.acceptance
+
 
 def _round():
     state = {"weight": torch.tensor([[1.0, 2.0]]), "counter": torch.tensor([1], dtype=torch.int64)}

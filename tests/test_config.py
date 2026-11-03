@@ -1,4 +1,8 @@
+import pytest
+
 from trashpanda.config import config_from_dict, get_recipe, load_config, model_recipe, resolve_training_config
+
+pytestmark = pytest.mark.unit
 
 
 def test_fixed_recipes():

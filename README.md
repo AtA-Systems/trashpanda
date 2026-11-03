@@ -64,6 +64,7 @@ The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 - [Local federated training quickstart](docs/getting-started-federation.md): run two
   synthetic participants, resume a local round, evaluate and export offline.
 - [Implementation map](docs/implementation/README.md): source modules and current limitations.
+- [Testing and CI](docs/testing.md): run the bounded feature acceptance suite and inspect CI/release validation evidence.
 - [Data and compute examples](docs/experiments.md): optional FineWeb-Edu and A100/Colab workflows.
 
 Project code is [Apache-2.0 licensed](LICENSE). Data, tokenizer, and weight rights

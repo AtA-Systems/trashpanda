@@ -19,9 +19,10 @@ from .provenance import make_record
 @dataclass(frozen=True)
 class EvaluationResult:
     loss: float
-    perplexity: float
+    perplexity: float | None
     tokens: int
     batches: int
+    perplexity_overflow: bool = False
 
 
 def evaluation_record(
@@ -39,7 +40,7 @@ def evaluation_record(
             "split": split,
             "settings": dict(settings),
             "counts": {"tokens": result.tokens, "batches": result.batches},
-            "metrics": {"loss": result.loss, "perplexity": result.perplexity},
+            "metrics": {"loss": result.loss, "perplexity": result.perplexity, "perplexity_overflow": result.perplexity_overflow},
             "input_identity": input_identity,
             "model_identity": model_identity,
             "evidence_state": "observed",
@@ -86,7 +87,13 @@ def evaluate(
     if total_tokens == 0:
         raise ValueError("evaluation produced no target tokens")
     loss = total_nll / total_tokens
-    return EvaluationResult(loss=loss, perplexity=math.exp(min(loss, 50.0)), tokens=total_tokens, batches=batches)
+    try:
+        perplexity = math.exp(loss)
+        overflow = False
+    except OverflowError:
+        perplexity = None
+        overflow = True
+    return EvaluationResult(loss=loss, perplexity=perplexity, tokens=total_tokens, batches=batches, perplexity_overflow=overflow)
 
 
 def sample(

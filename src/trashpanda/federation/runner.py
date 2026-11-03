@@ -75,6 +75,8 @@ def run_federation(config: FederationConfig, output_dir: str | Path, *, resume: 
                         command.extend(["--fail-after-steps", str(fail_after_steps)])
                     environment = dict(os.environ)
                     environment.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONHASHSEED": "0"})
+                    source_root = str(Path(__file__).resolve().parents[2])
+                    environment["PYTHONPATH"] = source_root + os.pathsep + environment.get("PYTHONPATH", "")
                     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
                     processes.append((participant.participant_id, process, bundle))
                     log.write(json.dumps({"event": "worker_started", "participant": participant.participant_id, "round": round_number, "pid": process.pid}) + "\n")

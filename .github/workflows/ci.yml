@@ -1,0 +1,45 @@
+name: CPU feature tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cpu-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    name: CPU unit and acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -c ci/constraints-py311.txt '.[test,provenance]'
+      - name: Run required feature tests
+        run: python -m pytest -m 'unit or acceptance' --require-feature-deps --strict-markers --junitxml=test-results/pytest.xml
+        env:
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          OMP_NUM_THREADS: '1'
+          MKL_NUM_THREADS: '1'
+      - name: Capture environment
+        if: always()
+        run: python -m pip freeze > test-results/pip-freeze.txt
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-test-evidence-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: warn

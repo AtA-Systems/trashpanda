@@ -16,7 +16,8 @@ from trashpanda.export import export_checkpoint
 from trashpanda.prepare import prepare_splits
 from trashpanda.tokenizer import TinyWordLevelTokenizer
 from trashpanda.train import train
-from trashpanda.model import build_model
+
+pytestmark = pytest.mark.acceptance
 
 
 def _dataset(tmp_path):
@@ -43,8 +44,9 @@ def test_tiny_train_resume_evaluate_export(tmp_path, architecture):
     assert resumed.state.consumed_tokens == 744
     assert any(not torch.equal(first_weights[name], value) for name, value in resumed.model.state_dict().items())
     assert len(list_checkpoints(tmp_path / f"checkpoints-{architecture}")) >= 2
-    result = evaluate(build_model(config.model, seed=0), validation, max_batches=1)
+    result = evaluate(resumed.model, validation, max_batches=1)
     assert result.tokens == 31
+    assert result.loss == result.loss and result.loss < float("inf")
     assert isinstance(sample_text(resumed.model, TinyWordLevelTokenizer(), "w0", max_new_tokens=2, seed=7), str)
     output = export_checkpoint(resumed.checkpoint, tmp_path / f"export-{architecture}")
     assert (output / "config.json").exists()

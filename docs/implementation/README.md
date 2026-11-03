@@ -19,20 +19,15 @@ organizational supply-chain assurances are separate claims.
 
 ## Validation boundaries
 
-The existing [tests](../../tests) cover recipe/config validation, tiny model
-construction, preparation, token accounting, a tiny train/resume/export path,
-canonical provenance records, tamper detection, policy comparison, and exchange
-mapping. The `scripts/provenance_demo.py` fixture covers real CPU updates with a
-100-parameter model and a relocatable bundle. `tests/test_federation.py` covers
-bundle validation, deterministic weighted averaging, and the two-process
-synthetic federation demo. These are not evidence of legal
-compliance, independent factual assurance, federated privacy, or public registry
-publication.
-
-In particular, the current tiny end-to-end test evaluates a fresh model and checks
-export file existence; it does not compare exported logits with the resumed model
-or establish bitwise split-run equivalence. Historical artifact verification has
-additional limitations documented in [experiment evidence](../experiments.md).
+The [tests](../../tests) cover recipe/config validation, tiny model construction,
+preparation, token accounting, both model lifecycles, exact CPU split-run
+recovery, canonical provenance records, tamper detection, policy comparison,
+portable native exports, federation aggregation and invalid contributions,
+coordinator crash recovery, multi-process participant recovery, held-out
+metrics, baselines and public export evidence. The complete commands and CI
+boundaries are documented in [Testing and CI](../testing.md). These tests are
+not evidence of legal compliance, independent factual assurance, federated
+privacy, or public registry publication.
 
 Documentation of these gaps is not a fix for them. The [first-model completion
 plan](../roadmap/first-model.md) identifies the next validation and recovery work.
