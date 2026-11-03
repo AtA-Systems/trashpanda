@@ -14,6 +14,7 @@ dependencies = [
   "torch>=2.0",
   "transformers>=4.40",
   "tokenizers>=0.15",
+  "safetensors>=0.4",
 ]
 
 [project.optional-dependencies]

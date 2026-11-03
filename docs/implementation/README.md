@@ -15,6 +15,7 @@ organizational supply-chain assurances are separate claims.
 | State persistence | [`checkpoint.py`](../../src/trashpanda/checkpoint.py) | [Recovery and limitations](training.md) |
 | Evaluation and native HF files | [`evaluate.py`](../../src/trashpanda/evaluate.py), [`export.py`](../../src/trashpanda/export.py) | [Evaluation/export](export.md) |
 | Metadata across these boundaries | `trashpanda.provenance`, manifests, checkpoint payloads, metrics | [Portable provenance](provenance.md) |
+| Local federation protocol | `trashpanda.federation.config`, `bundles`, `participant`, `aggregate`, `coordinator`, `runner` | [Federation implementation](federation.md), [Federation quickstart](../getting-started-federation.md) |
 
 ## Validation boundaries
 
@@ -22,7 +23,9 @@ The existing [tests](../../tests) cover recipe/config validation, tiny model
 construction, preparation, token accounting, a tiny train/resume/export path,
 canonical provenance records, tamper detection, policy comparison, and exchange
 mapping. The `scripts/provenance_demo.py` fixture covers real CPU updates with a
-100-parameter model and a relocatable bundle. These are not evidence of legal
+100-parameter model and a relocatable bundle. `tests/test_federation.py` covers
+bundle validation, deterministic weighted averaging, and the two-process
+synthetic federation demo. These are not evidence of legal
 compliance, independent factual assurance, federated privacy, or public registry
 publication.
 

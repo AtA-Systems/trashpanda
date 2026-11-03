@@ -9,7 +9,8 @@ with inspectable provenance, not another PyTorch or Hugging Face replacement.
 
 **Today:** an experimental single-machine causal-LM training foundation with
 CLI-selectable tiny Llama and GPT-2 architectures, plus an offline-first,
-inspectable provenance bundle. Provenance records are evidence
+inspectable provenance bundle and a local, synthetic-data federated training
+prototype. Provenance records are evidence
 mechanisms, not a delivered certification, legal conclusion, safety verdict, or
 privacy guarantee. [Read the vision and boundaries →](docs/vision.md)
 
@@ -22,6 +23,7 @@ privacy guarantee. [Read the vision and boundaries →](docs/vision.md)
 | CLI-selectable models | `--model llama` and `--model gpt2` use explicit native Hugging Face adapters; architecture identity is retained through checkpoints, resume, evaluation, and export. [Supported models](docs/models.md) |
 | Evaluation and model export | Loss/perplexity, sampling, and native Hugging Face model/tokenizer files. [How evaluation and export work](docs/implementation/export.md) |
 | Provenance-carrying checkpoints/exports | Versioned input/preparation/run/evaluation/artifact records, canonical identities, payload hashes, offline verification, and native HF export bundles. Adopters still provide policy/trust and interpret claims. [Implementation contract](docs/implementation/provenance.md) |
+| Local federated training prototype | Two local CPU participant processes, bounded round-local training, deterministic weighted averaging, crash-resumable file exchange, held-out evaluation, and portable round provenance using synthetic data. This is a research fixture, not a privacy guarantee or cross-machine service. [Federation implementation](docs/implementation/federation.md) · [Quickstart](docs/getting-started-federation.md) |
 
 [First Model (#1)](https://github.com/rawkintrevo/trashpanda/issues/1) is the initial
 milestone, not the whole project. Historical A100 records describe bounded
@@ -34,9 +36,9 @@ not established as complete**. [Evidence and artifact availability →](docs/exp
 | --- | --- |
 | Optional provenance integrations | Extend the implemented offline contract with additional standards mappings and adopter-controlled registry publication. [Integration boundary](docs/implementation/sourcelume.md) |
 | More model architectures | Add explicit adapters for additional model families while preserving evidence and recovery contracts. [Supported models and roadmap](docs/models.md) · [Roadmap](docs/roadmap/model-selection.md) |
-| Federated training | Enable organizations to collaborate while retaining proprietary raw data locally, with an explicit privacy/threat model. [Proposal](docs/roadmap/federated-training.md) |
+| Federated training next steps | Extend the local fixture to cross-machine/cross-organization transport, authenticated participation, threat-model validation, secure aggregation/differential privacy, and larger-scale evaluation. These remain proposed capabilities. [Roadmap](docs/roadmap/federated-training.md) |
 
-Additional model families and federated training remain proposed capabilities.
+Additional model families and cross-organization/privacy-protected federation remain proposed capabilities.
 The provenance CLI is a working local feature; it does not publish implicitly.
 The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 
@@ -59,6 +61,8 @@ The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 - [Offline provenance fixture](docs/getting-started.md#run-the-offline-provenance-fixture):
   two synthetic sources, a real 100-parameter CPU model, resume evidence, and
   relocatable verification.
+- [Local federated training quickstart](docs/getting-started-federation.md): run two
+  synthetic participants, resume a local round, evaluate and export offline.
 - [Implementation map](docs/implementation/README.md): source modules and current limitations.
 - [Data and compute examples](docs/experiments.md): optional FineWeb-Edu and A100/Colab workflows.
 

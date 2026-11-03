@@ -83,6 +83,22 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--policy", type=Path, help="optional adopter policy JSON")
     verify.add_argument("--strict", action="store_true", help="fail incomplete or unevaluated optional evidence")
     verify.add_argument("--json", action="store_true", help="emit stable JSON")
+
+    federate = commands.add_parser("federate", help="run the offline local-process federation prototype")
+    federate_commands = federate.add_subparsers(dest="federate_command", required=True)
+    federate_demo = federate_commands.add_parser("demo", help="generate synthetic participants and run locally")
+    federate_demo.add_argument("--output", type=Path, required=True)
+    federate_demo.add_argument("--compare-baselines", action="store_true")
+    federate_run = federate_commands.add_parser("run", help="run or resume a federation from a JSON config")
+    federate_run.add_argument("--config", type=Path)
+    federate_run.add_argument("--output", type=Path)
+    federate_run.add_argument("--resume", type=Path, help="resume this run directory; config is read from it unless --config is supplied")
+    federate_export = federate_commands.add_parser("export", help="export the completed global model and public provenance")
+    federate_export.add_argument("--run", type=Path, required=True)
+    federate_export.add_argument("--output", type=Path, required=True)
+    federate_evaluate = federate_commands.add_parser("evaluate", help="evaluate the completed global model in participant processes")
+    federate_evaluate.add_argument("--run", type=Path, required=True)
+    federate_evaluate.add_argument("--max-batches", type=int)
     return parser
 
 
@@ -155,6 +171,41 @@ def _reader(path: Path, split: str) -> SequenceReader:
 
 def _main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "federate":
+        from .federation.config import FederationConfig
+        from .federation.runner import make_demo_config, run_federation
+
+        if args.federate_command == "demo":
+            config, _fixture_config = make_demo_config(args.output / "fixture")
+            summary = run_federation(config, args.output / "run")
+            if args.compare_baselines:
+                from .federation.runner import compare_baselines
+                summary["baseline_comparison"] = compare_baselines(args.output / "run")
+            print(json.dumps(summary, sort_keys=True, indent=2))
+            return 0
+        if args.federate_command == "export":
+            from .federation.provenance import export_federation
+            path = export_federation(args.run, args.output)
+            print(json.dumps({"output": str(path)}, sort_keys=True))
+            return 0
+        if args.federate_command == "evaluate":
+            from .federation.evaluate import evaluate_federation
+            print(json.dumps(evaluate_federation(args.run, max_batches=args.max_batches), sort_keys=True, indent=2))
+            return 0
+        if args.resume is not None:
+            output = args.output or args.resume
+            config_path = args.config or (output / "config.json")
+            config = FederationConfig.from_file(config_path)
+        else:
+            if args.config is None:
+                raise SystemExit("federate run requires --config unless --resume is supplied")
+            if args.output is None:
+                raise SystemExit("federate run requires --output")
+            output = args.output
+            config = FederationConfig.from_file(args.config)
+        summary = run_federation(config, output, resume=args.resume is not None)
+        print(json.dumps(summary, sort_keys=True, indent=2))
+        return 0
     if args.command == "provenance":
         if args.provenance_command == "inspect":
             result = inspect_bundle(args.path)

@@ -33,6 +33,9 @@ RECORD_TYPES = frozenset(
         "claim",
         "policy_decision",
         "exchange",
+        "federation",
+        "federation_round",
+        "federation_contribution",
     }
 )
 
@@ -177,6 +180,9 @@ def validate_record(record: Mapping[str, Any], *, expected_type: str | None = No
         "claim": ("subject", "issuer", "purpose"),
         "policy_decision": ("policy_id", "decision", "reasons"),
         "exchange": ("mapping", "version"),
+        "federation": ("federation_id", "protocol_version", "participants", "rounds"),
+        "federation_round": ("federation_id", "round_number", "status", "parent_digest"),
+        "federation_contribution": ("federation_id", "round_number", "participant_id", "update_digest", "target_count"),
     }[record_type]
     missing = [key for key in required if key not in record]
     if missing:
