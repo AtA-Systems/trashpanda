@@ -1,6 +1,6 @@
 # Proposal: federated training across organizations
 
-**Status: proposed research and design; no federation is implemented.**
+**Status: local synthetic CPU prototype implemented; cross-organization federation remains proposed.**
 
 [Roadmap](README.md) · [Provenance proposal](provenance.md)
 
@@ -14,7 +14,21 @@ confidentiality boundaries.
 This is different from ordinary multi-GPU/distributed training under one operator.
 It introduces separate owners, trust boundaries, policies, and failure modes.
 
-## Proposed starting architecture
+## Delivered local prototype
+
+The repository now includes a first-party, offline runner for two participant
+processes on one machine. It uses the tiny Llama recipe, synthetic prepared data,
+immutable JSON/safetensors round bundles, bounded local AdamW updates, weighted
+full-model averaging, crash-resumable private state, held-out metrics and a
+portable public provenance projection. See the [implementation guide](../implementation/federation.md)
+and [quickstart](../getting-started-federation.md).
+
+This fixture exposes individual updates to the coordinator, uses participant IDs
+as labels rather than cryptographic identities, and is not an OS security sandbox.
+It must not be used as evidence of privacy, convergence, certification or
+proprietary-data readiness.
+
+## Proposed next architecture
 
 1. Agree a model/tokenizer identity, protocol version, participant authorization,
    training policy, permitted update format, and disclosure rules.
@@ -22,9 +36,10 @@ It introduces separate owners, trust boundaries, policies, and failure modes.
    training against a verified round checkpoint; emit bounded updates and permitted
    provenance/approval claims, not raw records.
 3. Use a coordinator or agreed aggregation service to combine compatible updates.
-   Evaluate existing federated-learning frameworks before implementing a protocol.
-   A round-based averaging experiment is a candidate baseline, not a chosen algorithm
-   or a claim of convergent large-language-model training.
+   Evaluate cross-machine transport and existing federated-learning frameworks
+   before expanding the first-party protocol. The local round-based averaging
+   experiment is a bounded research baseline, not a claim of convergent
+   large-language-model training.
 4. Bind the resulting model to round IDs, parent checkpoints, aggregate counters,
    participant attestations, and the limits of disclosed dataset lineage.
 5. Define recovery and audit semantics for participant dropout, failed rounds,

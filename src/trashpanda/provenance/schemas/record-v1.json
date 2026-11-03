@@ -7,7 +7,7 @@
   "properties": {
     "format": {"const": "trashpanda.provenance.record"},
     "schema_version": {"const": "1.0"},
-    "type": {"enum": ["input", "preparation", "run", "execution_segment", "artifact", "evaluation", "claim", "policy_decision", "exchange"]},
+    "type": {"enum": ["input", "preparation", "run", "execution_segment", "artifact", "evaluation", "claim", "policy_decision", "exchange", "federation", "federation_round", "federation_contribution"]},
     "id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   },
   "additionalProperties": true
