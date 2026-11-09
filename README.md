@@ -56,6 +56,9 @@ The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
 
 ## Start here
 
+- [Google Colab walkthrough](examples/trashpanda_colab.ipynb) · [Open in Colab](https://colab.research.google.com/github/rawkintrevo/trashpanda/blob/main/examples/trashpanda_colab.ipynb):
+  select Llama or GPT-2, persist data and checkpoints in Google Drive, resume across
+  sessions, and inspect/export a provenance-carrying model.
 - [CPU quickstart](docs/getting-started.md): exercise preparation, training, resume,
   evaluation, and offline export without a GPU or downloaded training data.
 - [Offline provenance fixture](docs/getting-started.md#run-the-offline-provenance-fixture):
