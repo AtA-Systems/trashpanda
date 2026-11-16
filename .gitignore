@@ -231,3 +231,7 @@ __marimo__/
 artifacts/**/checkpoint/*.pt
 artifacts/**/export/*.safetensors
 
+
+# Local training data and run outputs
+/prepared/
+/runs/
