@@ -11,10 +11,20 @@ prepared dataset serves both.
 | `22m-gtx1060` | 22,467,456 | one 6 GB card | 32 / 8 | 100,000,000 | 1,000 updates |
 | `40m-titanx` | 40,509,952 | one 12 GB card | 32 / 8 | 200,000,000 | 500 updates |
 
-These recipes pass the CPU test suite and a one-step CPU smoke test. **They have
-not been validated on GPU hardware**; memory headroom and throughput are for you to
-measure. Both use FP32 because pre-Turing cards (GTX 900/1000 series, Titan X) have
-no fast half precision.
+Both recipes pass the CPU test suite and a one-step CPU smoke test. Both use FP32
+because pre-Turing cards (GTX 900/1000 series, Titan X) have no fast half precision.
+
+GPU evidence so far:
+
+| Recipe | Hardware | What was run | Observed |
+| --- | --- | --- | --- |
+| `22m-gtx1060` | GTX 1060 Mobile, Intel i7-7700HQ laptop, PyTorch CUDA 12.6 build | 20 updates at the recipe defaults, 2026-11-15 | about 11,680 targets/second (updates 5 to 20); about 3 GB GPU memory in `nvidia-smi` |
+| `40m-titanx` | none | not yet run on a GPU | none |
+
+This is one short operator-reported run, not a benchmark: no completed full-budget
+run, validation loss, or repeat measurement is recorded here. At that rate the
+100,000,000-target budget is about 2.4 hours. Measure your own hardware as described
+below.
 
 ## Install
 
