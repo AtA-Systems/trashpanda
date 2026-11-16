@@ -9,7 +9,7 @@ from typing import Any
 
 from dataclasses import replace
 
-from .config import MODEL_ARCHITECTURES, load_config, model_recipe, resolve_training_config
+from .config import MODEL_ARCHITECTURES, RECIPE_NAMES, load_config, model_recipe, resolve_training_config
 from .data import SequenceReader
 from .prepare import prepare_splits
 from .provenance import inspect_bundle, load_policy, verify_bundle
@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--train", type=Path, action="append", required=True)
     prepare.add_argument("--validation", type=Path, action="append", required=True)
     prepare.add_argument("--output", type=Path, required=True)
-    prepare.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
+    prepare.add_argument("--recipe", choices=RECIPE_NAMES, default="tiny")
     prepare.add_argument("--model", choices=MODEL_ARCHITECTURES, default="llama")
     prepare.add_argument("--tokenizer")
     prepare.add_argument("--revision")
@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     train = commands.add_parser("train", help="token-budgeted training")
     train.add_argument("--data", type=Path)
-    train.add_argument("--recipe", choices=("tiny", "300m-a100"), default=None)
+    train.add_argument("--recipe", choices=RECIPE_NAMES, default=None)
     train.add_argument("--model", choices=MODEL_ARCHITECTURES, default=None)
     train.add_argument("--output", type=Path)
     train.add_argument("--tokens", type=int)
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--allow-download", action="store_true")
 
     show = commands.add_parser("show-config", help="print a resolved recipe")
-    show.add_argument("--recipe", choices=("tiny", "300m-a100"), default="tiny")
+    show.add_argument("--recipe", choices=RECIPE_NAMES, default="tiny")
     show.add_argument("--model", choices=MODEL_ARCHITECTURES, default="llama")
     show.add_argument("--config", type=Path)
 

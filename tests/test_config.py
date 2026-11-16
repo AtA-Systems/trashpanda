@@ -1,6 +1,6 @@
 import pytest
 
-from trashpanda.config import config_from_dict, get_recipe, load_config, model_recipe, resolve_training_config
+from trashpanda.config import RECIPE_NAMES, _recipes, config_from_dict, get_recipe, load_config, model_recipe, resolve_training_config
 
 pytestmark = pytest.mark.unit
 
@@ -16,6 +16,23 @@ def test_fixed_recipes():
     production = get_recipe("300m-a100")
     assert production.parameter_count == 298_103_808
     assert production.training.token_budget == 6_000_000_000
+
+
+def test_small_single_gpu_recipe():
+    assert tuple(_recipes()) == RECIPE_NAMES
+    small = get_recipe("40m-titanx")
+    assert small.parameter_count == 40_509_952
+    assert small.model.context_length == 512
+    assert (small.training.batch_size, small.training.microbatch_size) == (32, 8)
+    assert (small.training.precision, small.training.device) == ("fp32", "cuda")
+    assert load_config("40m-titanx", overrides={"microbatch_size": 16}).training.microbatch_size == 16
+    with pytest.raises(ValueError, match="only supports"):
+        model_recipe("40m-titanx", "gpt2")
+    laptop = get_recipe("22m-gtx1060")
+    assert laptop.parameter_count == 22_467_456
+    assert laptop.model.context_length == small.model.context_length
+    assert (laptop.training.precision, laptop.training.device) == ("fp32", "cuda")
+    assert laptop.training.checkpoint_interval == 1000
 
 
 def test_strict_flat_overrides_and_precedence():

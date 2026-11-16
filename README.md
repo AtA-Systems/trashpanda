@@ -61,6 +61,9 @@ The [roadmap](docs/roadmap/README.md) tracks remaining first-model work.
   sessions, and inspect/export a provenance-carrying model.
 - [CPU quickstart](docs/getting-started.md): exercise preparation, training, resume,
   evaluation, and offline export without a GPU or downloaded training data.
+- [Small local GPU guide](docs/small-gpu.md): install, prepare, train, and resume the
+  `22m-gtx1060` and `40m-titanx` recipes on one consumer NVIDIA card, and use a
+  second card for a parallel run.
 - [Offline provenance fixture](docs/getting-started.md#run-the-offline-provenance-fixture):
   two synthetic sources, a real 100-parameter CPU model, resume evidence, and
   relocatable verification.

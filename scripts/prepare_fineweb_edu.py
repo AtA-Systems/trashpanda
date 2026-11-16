@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tokenizer-revision", default=MISTRAL_TOKENIZER_REVISION)
     parser.add_argument("--tokenizer-cache", type=Path)
     parser.add_argument("--allow-download", action="store_true")
+    parser.add_argument("--recipe", choices=("300m-a100", "40m-titanx", "22m-gtx1060"), default="300m-a100", help="recipe whose context length and vocabulary the shards must match")
     args = parser.parse_args(argv)
     if args.train_documents <= 0 or args.validation_documents <= 0:
         parser.error("document counts must be positive")
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                     break
         if train_count < args.train_documents or validation_count < args.validation_documents:
             raise RuntimeError("FineWeb-Edu stream ended before both requested splits were filled")
-        config = get_recipe("300m-a100")
+        config = get_recipe(args.recipe)
         tokenizer_name = str(args.tokenizer_cache) if args.tokenizer_cache else args.tokenizer
         tokenizer = load_tokenizer(
             tokenizer_name,

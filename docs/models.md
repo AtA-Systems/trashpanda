@@ -9,7 +9,7 @@ implemented together.
 
 | Model | Selectors | Recipes | Initialization | Tokenizer and test scope |
 | --- | --- | --- | --- | --- |
-| Llama | `--model llama` (default) | `tiny`, `300m-a100` | Scratch initialization through `LlamaForCausalLM` | Project-owned 32-token WordLevel tokenizer for `tiny`; pinned Mistral tokenizer for `300m-a100`; tiny CPU workflow is CI-safe |
+| Llama | `--model llama` (default) | `tiny`, `300m-a100`, `40m-titanx`, `22m-gtx1060` | Scratch initialization through `LlamaForCausalLM` | Project-owned 32-token WordLevel tokenizer for `tiny`; pinned Mistral tokenizer for `300m-a100`, `40m-titanx` and `22m-gtx1060` (40.5M- and 22.5M-parameter FP32 recipes sized for one 12 GB or 6 GB GPU; not yet run on GPU hardware); tiny CPU workflow is CI-safe |
 | GPT-2 | `--model gpt2` | `tiny` | Scratch initialization through `GPT2LMHeadModel` | Project-owned 32-token WordLevel tokenizer; context 32; FP32 CPU workflow is CI-safe |
 
 For example, select GPT-2 while preparing and training the tiny fixture:
