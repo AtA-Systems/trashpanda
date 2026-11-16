@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--config", type=Path, help="strict flat JSON override file")
     train.add_argument("--max-steps", type=int)
     train.add_argument("--policy", type=Path, help="adopter policy JSON to evaluate before optimizer work")
+    train.add_argument("--gpus", type=int, help="number of CUDA devices to split each update across (default: one)")
 
     evaluate = commands.add_parser("evaluate", help="evaluate a checkpoint")
     evaluate.add_argument("--checkpoint", type=Path, required=True)
@@ -283,9 +284,10 @@ def _main(argv: list[str] | None = None) -> int:
             raise SystemExit("resume requires --data unless the resolved config records data.train_path")
         dataset = SequenceReader(data_path, split="train")
         tokenizer = _tokenizer_from_prepared(data_path, config)
+        from .parallel import resolve_devices
         from .train import train as run_training
 
-        result = run_training(config, dataset, tokenizer=tokenizer, resume=args.resume, checkpoint_dir=args.output or args.resume, max_steps=args.max_steps, policy=load_policy(args.policy) if args.policy else None)
+        result = run_training(config, dataset, tokenizer=tokenizer, resume=args.resume, checkpoint_dir=args.output or args.resume, max_steps=args.max_steps, policy=load_policy(args.policy) if args.policy else None, devices=resolve_devices(config.training, args.gpus))
         print(json.dumps({"state": result.state.to_dict(), "checkpoint": str(result.checkpoint), "device": result.device}, sort_keys=True))
         return 0
 

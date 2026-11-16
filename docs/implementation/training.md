@@ -31,6 +31,13 @@ repeats data by default. The loop does not yet provide the prominent repetition
 warnings specified in #1. A 6B target on a small prepared corpus means repeated
 passes—not 6B unique source tokens.
 
+`train --gpus N` runs the microbatches of each update concurrently on `N` CUDA
+devices in one process and sums their gradients on the first; sampler order,
+accounting, and checkpoints are those of a single-device run. It is CPU-tested by
+device emulation and not yet validated on multi-GPU hardware. See
+[`parallel.py`](../../src/trashpanda/parallel.py) and the
+[small GPU guide](../small-gpu.md#two-or-more-gpus-in-one-machine).
+
 `--config` accepts only `token_budget`, `microbatch_size`, `learning_rate`, and
 `repeat_data`. See [`config.py`](../../src/trashpanda/config.py) for constraints.
 Current CLI defaults to the tiny Llama recipe; select `--model gpt2` for the tiny

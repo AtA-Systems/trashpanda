@@ -1,6 +1,7 @@
 """Token-budgeted training with accumulation, finite checks, signals, and resume."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 try:
     import numpy as np
@@ -29,6 +30,7 @@ from .checkpoint import TrainingState, checkpoint_path, load_checkpoint, restore
 from .config import Config, TrainingConfig
 from .data import MMapTokenDataset, PCG64Sampler
 from .model import build_model, causal_loss
+from .parallel import ReplicaSet, validate_devices
 from .provenance import evaluate_policy, make_record, record_identity, sha256_file
 from .tokenizer import DeterministicTokenizer, tokenizer_snapshot
 
@@ -211,10 +213,14 @@ def _provenance_snapshot(
     config: Config,
     policy_decision: Mapping[str, Any] | None = None,
     source_target_counts: Mapping[str, int] | None = None,
+    devices: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     segment = make_record(
         "execution_segment",
         {
+            # Present only for multi-device segments, so single-device record
+            # identities are unchanged.
+            **({"devices": list(devices)} if devices else {}),
             "run_id": run_id,
             "session_id": session_id,
             "status": status,
@@ -278,8 +284,14 @@ def train(
     checkpoint_dir: str | Path | None = None,
     max_steps: int | None = None,
     policy: Mapping[str, Any] | None = None,
+    devices: Sequence[Any] | None = None,
 ) -> TrainResult:
-    """Run updates until the shifted-token budget or max_steps is reached."""
+    """Run updates until the shifted-token budget or max_steps is reached.
+
+    ``devices`` optionally names the devices to train on.  With more than one,
+    the microbatches of each update run concurrently on per-device replicas
+    (see :mod:`trashpanda.parallel`); the first device hosts the primary model.
+    """
     _require_torch()
     if len(dataset) == 0:
         raise ValueError("training dataset is empty")
@@ -303,6 +315,13 @@ def train(
         seed_everything(config.training.seed, deterministic=config.runtime.deterministic)
         model = build_model(config.model, seed=config.training.seed)
     device = resolve_device(config.training)
+    replica_devices: list[Any] | None = None
+    if devices is not None:
+        replica_devices = validate_devices(devices, config.training)
+        device = replica_devices[0]
+        if len(replica_devices) == 1:
+            replica_devices = None
+    device_names = [str(item) for item in replica_devices] if replica_devices else None
     model.to(device)
     model.train()
     optimizer = torch.optim.AdamW(
@@ -397,29 +416,49 @@ def train(
     autocast_enabled = config.training.precision in {"bf16", "fp16"} and device.type == "cuda"
     autocast_dtype = torch.bfloat16 if config.training.precision == "bf16" else torch.float16
 
-    with _BoundarySignal() as boundary:
+    replicas = (
+        ReplicaSet(model, replica_devices, autocast_enabled=autocast_enabled, autocast_dtype=autocast_dtype)
+        if replica_devices
+        else None
+    )
+
+    with _BoundarySignal() as boundary, (replicas if replicas is not None else nullcontext()):
         for _ in range(updates_remaining):
             optimizer.zero_grad(set_to_none=True)
             update_loss = 0.0
-            for _micro in range(config.training.grad_accumulation_steps):
-                indices = sampler.next_indices(config.training.microbatch_size)
-                inputs, targets = dataset.batch(indices)
-                target_attribution = getattr(dataset, "target_source_counts", lambda _indices: {})
-                for source_id, count in target_attribution(indices).items():
-                    source_target_totals[source_id] = source_target_totals.get(source_id, 0) + int(count)
-                inputs = inputs.to(device, non_blocking=True)
-                targets = targets.to(device, non_blocking=True)
-                with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_enabled):
-                    loss = causal_loss(model, inputs, targets)
-                if not _finite_tensor(loss):
-                    raise FloatingPointError("non-finite loss encountered")
-                update_loss += float(loss.detach().float().item())
-                scaled_loss = loss / config.training.grad_accumulation_steps
-                if scaler.is_enabled():
-                    scaler.scale(scaled_loss).backward()
-                else:
-                    scaled_loss.backward()
-                state.micro_steps += 1
+            if replicas is not None:
+                # Draw every microbatch of this update in sampler order, exactly
+                # as the single-device loop would, then fan them out.
+                microbatches = []
+                for _micro in range(config.training.grad_accumulation_steps):
+                    indices = sampler.next_indices(config.training.microbatch_size)
+                    microbatches.append(dataset.batch(indices))
+                    target_attribution = getattr(dataset, "target_source_counts", lambda _indices: {})
+                    for source_id, count in target_attribution(indices).items():
+                        source_target_totals[source_id] = source_target_totals.get(source_id, 0) + int(count)
+                for value in replicas.accumulate(microbatches, config.training.grad_accumulation_steps):
+                    update_loss += value
+                state.micro_steps += len(microbatches)
+            else:
+                for _micro in range(config.training.grad_accumulation_steps):
+                    indices = sampler.next_indices(config.training.microbatch_size)
+                    inputs, targets = dataset.batch(indices)
+                    target_attribution = getattr(dataset, "target_source_counts", lambda _indices: {})
+                    for source_id, count in target_attribution(indices).items():
+                        source_target_totals[source_id] = source_target_totals.get(source_id, 0) + int(count)
+                    inputs = inputs.to(device, non_blocking=True)
+                    targets = targets.to(device, non_blocking=True)
+                    with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_enabled):
+                        loss = causal_loss(model, inputs, targets)
+                    if not _finite_tensor(loss):
+                        raise FloatingPointError("non-finite loss encountered")
+                    update_loss += float(loss.detach().float().item())
+                    scaled_loss = loss / config.training.grad_accumulation_steps
+                    if scaler.is_enabled():
+                        scaler.scale(scaled_loss).backward()
+                    else:
+                        scaled_loss.backward()
+                    state.micro_steps += 1
             if scaler.is_enabled():
                 scaler.unscale_(optimizer)
             for parameter in model.parameters():
@@ -452,6 +491,7 @@ def train(
                     config=config,
                     policy_decision=policy_decision,
                     source_target_counts=source_target_totals,
+                    devices=device_names,
                 )
                 last_checkpoint = _save_training_checkpoint(
                     destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset, provenance=provenance
@@ -485,6 +525,7 @@ def train(
             config=config,
             policy_decision=policy_decision,
             source_target_counts=source_target_totals,
+            devices=device_names,
         )
         last_checkpoint = _save_training_checkpoint(destination, model, optimizer, scheduler, state, config, sampler, tokenizer, dataset, provenance=provenance)
     return TrainResult(
