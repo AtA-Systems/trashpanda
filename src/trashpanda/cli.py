@@ -144,12 +144,47 @@ def _checkpoint_model(checkpoint: Path) -> tuple[Any, Any, Any]:
 
     config = _checkpoint_config(checkpoint)
     model = build_model(config.model, seed=config.training.seed)
-    load_checkpoint(checkpoint, model=model, map_location="cpu")
-    try:
-        tokenizer = _tokenizer_for(config)
-    except RuntimeError:
-        tokenizer = TinyWordLevelTokenizer()
+    payload = load_checkpoint(checkpoint, model=model, map_location="cpu")
+    tokenizer = _tokenizer_from_checkpoint(payload, config)
+    if tokenizer is None:
+        try:
+            tokenizer = _tokenizer_for(config)
+        except RuntimeError:
+            tokenizer = TinyWordLevelTokenizer()
     return config, model, tokenizer
+
+
+def _tokenizer_from_checkpoint(payload: Any, config: Any) -> Any | None:
+    """Rebuild a non-tiny tokenizer from the files embedded in a checkpoint.
+
+    Training stores the prepared dataset's tokenizer directory in every
+    checkpoint, so sampling and evaluation need neither the prepared directory
+    nor a Hub cache.  Returns ``None`` when the checkpoint embeds no files (or
+    is a tiny fixture), leaving the caller on the name-based lookup.
+    """
+    files = payload.get("tokenizer_files") if isinstance(payload, dict) else None
+    if not files or config.model.vocab_size == 32:
+        return None
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="trashpanda-tokenizer-") as temp:
+        root = Path(temp)
+        for name, content in files.items():
+            relative = Path(str(name))
+            if relative.is_absolute() or ".." in relative.parts or not isinstance(content, (bytes, bytearray)):
+                raise ValueError("checkpoint tokenizer files are malformed")
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(bytes(content))
+        # The recorded snapshot hash covers the tokenizer's load path, so it
+        # cannot be rechecked from a temporary directory.  The files travel in
+        # the same payload as the weights and carry the same trust.
+        return load_tokenizer(
+            str(root),
+            revision=config.data.tokenizer_revision,
+            vocab_size=config.model.vocab_size,
+            local_files_only=True,
+        )
 
 
 def _tokenizer_from_prepared(data: Path, config: Any) -> Any:

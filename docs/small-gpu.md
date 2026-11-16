@@ -82,6 +82,10 @@ python -m trashpanda export --checkpoint runs/22m/checkpoint-00001000.pt \
   --output runs/22m-export
 ```
 
+`evaluate` and `sample` rebuild the tokenizer from the files stored inside the
+checkpoint, so they need neither the prepared directory's tokenizer nor a Hugging
+Face cache.
+
 ### Tuning
 
 - **Out of memory:** lower `--microbatch-size` (it must divide the batch size of
