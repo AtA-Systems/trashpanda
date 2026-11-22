@@ -106,6 +106,7 @@ Environment set in the image (override with `-e` only if you mean to):
 | `HF_HUB_DISABLE_TELEMETRY` | `1` | No usage pings from training hosts |
 | `VIRTUAL_ENV`, `PATH` | `/opt/venv` | `python` is the image's Python with torch and trashpanda |
 | `PYTHONUNBUFFERED` | `1` | Logs appear immediately in `docker logs` and journals |
+| `TRASHPANDA_CUDA_MEMORY_FRACTION` | unset (no cap) | Set with `-e` on a GPU shared with vLLM, e.g. `0.20`; see [Sharing the Gemma box's GPU](#sharing-the-gemma-boxs-gpu) |
 
 Labels (`docker image inspect`): `org.opencontainers.image.source` (links the
 package to the GitHub repo), `.revision` (commit), `.version` (`<version>-<flavor>`),
@@ -360,6 +361,116 @@ curl -s localhost:8000/v1/completions -H 'Content-Type: application/json' \
   server for local inference; both offer an OpenAI-compatible API.
 - `docker/tests/vllm_smoke.sh <export>` does this end to end and checks the answers.
 
+## Data-center hosts: Hetzner GEX63
+
+Two identical boxes. One serves Qwen3.8-27B with vLLM on the whole GPU; the other
+serves Gemma 4 with vLLM and also runs the trashpanda trainer container, sharing its
+one GPU. Both run plain `dockerd`.
+
+| Part | GEX63 |
+| --- | --- |
+| GPU | 1× NVIDIA RTX PRO 6000 Blackwell Max-Q, 96 GB GDDR7 ECC, compute capability 12.0, 300 W |
+| CPU | Intel Core Ultra 7 265, 20 cores / 20 threads |
+| RAM | 128 GB DDR5 |
+| Disk | 2× 1.92 TB Gen4 NVMe (datacenter edition) |
+| Image | `modern` (CUDA 13.0 PyTorch; host driver 580 or newer) |
+
+```mermaid
+flowchart LR
+  gw["LLM gateway"] --> q
+  gw --> g
+  subgraph boxA["GEX63 #1"]
+    q["vLLM: Qwen3.8-27B<br/>whole GPU"]
+  end
+  subgraph boxB["GEX63 #2: one 96 GB GPU, shared"]
+    g["vLLM: Gemma 4<br/>--gpu-memory-utilization 0.70"]
+    t["trashpanda trainer container<br/>TRASHPANDA_CUDA_MEMORY_FRACTION=0.20"]
+  end
+  t -->|export → publish_export.py| hf[("huggingface.co/ata-systems")]
+  hf -.->|later: serve a trashpanda model| g
+```
+
+### Sharing the Gemma box's GPU
+
+vLLM takes a fixed share of GPU memory at startup (`--gpu-memory-utilization`, 0.9 by
+default) and holds it. The trainer must therefore be capped too, or it can grow into
+memory vLLM needs on its next restart. Split the 96 GB on purpose:
+
+| Share | Who | Setting |
+| --- | --- | --- |
+| 0.70 (≈67 GB) | vLLM, Gemma 4: weights + KV cache | `--gpu-memory-utilization 0.70` |
+| 0.20 (≈19 GB) | trashpanda trainer | `-e TRASHPANDA_CUDA_MEMORY_FRACTION=0.20` |
+| ≈0.10 (≈10 GB) | CUDA contexts, cuBLAS workspaces, headroom | nothing to set |
+
+`TRASHPANDA_CUDA_MEMORY_FRACTION` caps PyTorch's allocator in `train`, `evaluate`,
+`sample` and `federate` on every visible GPU. Past the cap, the trainer fails with its
+own out-of-memory error; vLLM is untouched. Context overhead isn't covered by the cap,
+hence the headroom row.
+
+Which Gemma 4 fits in 0.70: Google lists approximate memory needs of 69.9 GB (16-bit),
+34.9 GB (8-bit) and 17.5 GB (4-bit) for the 31B model, and 57.7 / 28.8 / 14.4 GB for
+26B A4B ([Gemma 4 docs](https://ai.google.dev/gemma/docs/core)). So on the shared box,
+31B at 16-bit doesn't fit; 31B at FP8 (Blackwell runs FP8 natively) or 26B A4B leave
+room for the KV cache. That choice belongs to whoever runs the Gemma server; if it
+needs more, lower the trainer's fraction to match. Qwen3.8-27B, alone on box #1, can
+keep vLLM's default 0.9.
+
+Memory is split exactly; compute is not. Both processes time-share the GPU's cores, so
+a training run slows Gemma's responses while it runs. Start with training off-hours, and
+watch the gateway's latency the first time both run together.
+
+MIG would give hard isolation instead: the RTX PRO 6000 Blackwell Max-Q supports up to
+four [MIG](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/supported-gpus.html)
+instances. On the Max-Q it first needs the card switched to compute mode with NVIDIA's
+Display Mode Selector tool, which on a rented server means asking Hetzner. Treat it as a
+later option; the memory split above needs nothing from them. With MIG, pass the slice
+as `--gpus device=MIG-<uuid>` and drop the fraction.
+
+### Running the trainer on the Gemma box
+
+```bash
+docker run -d --name tp-train --restart no \
+  --gpus all --ipc=host --shm-size=8g \
+  --cpus 12 --memory 64g \
+  --user "$(id -u):$(id -g)" -e HOME=/work \
+  -e TRASHPANDA_CUDA_MEMORY_FRACTION=0.20 \
+  -v /data/datasets/NAME:/data/prepared:ro \
+  -v /data/runs:/runs \
+  -v /data/models/huggingface:/hf \
+  ghcr.io/ata-systems/trashpanda@sha256:<modern digest> \
+  python -m trashpanda train --recipe 300m-a100 --data /data/prepared \
+    --output /runs/NAME --microbatch-size 4
+docker logs -f tp-train
+```
+
+- `-d --name` runs it in the background under a name; `docker logs -f` follows it, and
+  `docker stop tp-train` ends it (resume later with `--resume`).
+- `--cpus 12 --memory 64g` leaves 8 cores and half the RAM for vLLM and the host.
+- Precision: Blackwell trains fast in bf16. The `300m-a100` recipe is bf16 with a 2048
+  context; at `--microbatch-size 4` we estimate it fits in ~19 GB, but measure first (next
+  section). The FP32 small-GPU recipes (`40m-titanx`) also run here, just without the
+  bf16 speedup. Datasets are per context length: `40m-titanx` data (512) can't feed
+  `300m-a100` (2048).
+
+### First checks on each box
+
+```bash
+nvidia-smi                       # RTX PRO 6000 Blackwell Max-Q, driver 580+
+docker run --rm --gpus all ubuntu:24.04 nvidia-smi -L
+docker/test-image.sh ghcr.io/ata-systems/trashpanda:main-modern \
+  --data /data/datasets/fw-40m-titanx --gpu-memory-fraction 0.20
+```
+
+The `e2e-gpu` stage proves the `modern` image's PyTorch runs on compute 12.0 and reports
+seconds per update; with `--recipe 300m-a100 --microbatch-size 4` and a 2048-context
+dataset it measures the real job's speed and memory. Run `--vllm` (with `GPU_UTIL=0.1`)
+only while the box's own vLLM has room to spare.
+
+Disks: two 1.92 TB NVMe drives are 1.92 TB mirrored (Hetzner's installer defaults to
+software RAID 1) or ~3.8 TB striped or separate. Mirroring protects the host; striping
+doubles space. Either way, exports that matter go to Hugging Face, so a lost disk costs
+a rerun, not a model.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -373,3 +484,5 @@ curl -s localhost:8000/v1/completions -H 'Content-Type: application/json' \
 | Hugging Face 403 creating or uploading to `ata-systems/…` | Token lacks org repo create/write, or was made with the Write preset | New fine-grained token with the org permissions above |
 | `denied` pushing to GHCR | Token lacks `write:packages`, or the repo's Actions lack package access | Classic PAT with `write:packages`; package settings → Manage Actions access |
 | vLLM: "too old to be supported" | Pascal card | Serve on compute 7.0+, or use Ollama/llama.cpp locally |
+| vLLM won't start on the shared box: not enough free memory | The trainer (or another process) holds more than its share | Set `TRASHPANDA_CUDA_MEMORY_FRACTION` so trainer + vLLM ≤ ~0.9; check `nvidia-smi` |
+| Trainer: `CUDA out of memory` with a fraction set | The job needs more than its cap | Lower `--microbatch-size`, or raise the fraction and lower vLLM's share to match |

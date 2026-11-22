@@ -205,8 +205,48 @@ def _reader(path: Path, split: str) -> SequenceReader:
         raise
 
 
+MEMORY_FRACTION_ENV = "TRASHPANDA_CUDA_MEMORY_FRACTION"
+
+
+def parse_memory_fraction(value: str | None) -> float | None:
+    """Parse TRASHPANDA_CUDA_MEMORY_FRACTION: a share of each GPU's memory,
+    0 < f <= 1, or unset/empty for no cap."""
+    if value is None or value.strip() == "":
+        return None
+    try:
+        fraction = float(value)
+    except ValueError:
+        raise ValueError(f"{MEMORY_FRACTION_ENV} must be a number in (0, 1], got {value!r}") from None
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"{MEMORY_FRACTION_ENV} must be in (0, 1], got {fraction}")
+    return fraction
+
+
+def apply_memory_fraction(environ: Any = None) -> float | None:
+    """Cap this process's PyTorch allocations on every visible GPU, so a
+    trainer sharing a card with an inference server (vLLM preallocates its
+    share) fails with its own out-of-memory error instead of starving the
+    server. Returns the fraction applied, or None."""
+    import os
+
+    fraction = parse_memory_fraction((environ if environ is not None else os.environ).get(MEMORY_FRACTION_ENV))
+    if fraction is None:
+        return None
+    try:
+        import torch
+    except ImportError:
+        return None
+    if torch.cuda.is_available():
+        for index in range(torch.cuda.device_count()):
+            torch.cuda.set_per_process_memory_fraction(fraction, index)
+        print(f"trashpanda: capping GPU memory at {fraction:.0%} of each device ({MEMORY_FRACTION_ENV})", file=sys.stderr)
+    return fraction
+
+
 def _main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command in {"train", "evaluate", "sample", "federate"}:
+        apply_memory_fraction()
     if args.command == "federate":
         from .federation.config import FederationConfig
         from .federation.runner import make_demo_config, run_federation
@@ -363,4 +403,4 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
-__all__ = ["build_parser", "main"]
+__all__ = ["apply_memory_fraction", "build_parser", "main", "parse_memory_fraction"]
