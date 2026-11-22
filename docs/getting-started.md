@@ -123,6 +123,11 @@ PY
 python -m pytest -q
 ```
 
+The same load, as a script that also generates text and checks the export against
+its checkpoint: `python scripts/run_export.py "$DEMO/export" --prompt 'w0 w1' --check
+"$DEMO/run/checkpoint-00000006.pt"`. Containers, publishing and serving are covered in
+[Containers](containers.md).
+
 Retain the printed temporary directory if you want to inspect the generated
 manifest, metrics and checkpoints. A fresh Git clone does not include the
 historical large model binaries. [Artifact availability and GPU examples →](experiments.md)

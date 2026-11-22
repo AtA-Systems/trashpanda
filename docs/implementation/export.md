@@ -41,6 +41,15 @@ tokenizer in its local cache; it does not reconstruct tokenizer files from a `.p
 checkpoint. Preserve those assets separately until the self-contained artifact
 contract is implemented.
 
+[`compare_export()`](../../src/trashpanda/export.py) checks an export against its
+checkpoint the way a Hugging Face consumer would load it: `AutoModelForCausalLM` and
+`AutoTokenizer` from the export folder only, then logits on a prompt (within 1e-4)
+and greedy generation (token for token). [`scripts/run_export.py`](../../scripts/run_export.py)
+uses it for `--check`, and the container end-to-end test uses it as its last stage.
+[`scripts/publish_export.py`](../../scripts/publish_export.py) verifies an export,
+adds a model card and uploads it to a Hugging Face repository; see
+[Containers](../containers.md).
+
 An exported model can be used for inference; it is not by itself a faithful
 training-resume checkpoint. See [training/recovery](training.md) and
 [model-bound provenance](../roadmap/provenance.md).

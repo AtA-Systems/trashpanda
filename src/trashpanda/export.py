@@ -145,4 +145,71 @@ def export_checkpoint(
     return exported
 
 
-__all__ = ["export_checkpoint", "export_hf"]
+def _dtype_kwargs(dtype: Any) -> dict[str, Any]:
+    """transformers renamed ``torch_dtype`` to ``dtype`` in 4.56."""
+    import transformers
+
+    major, minor = (int(part) for part in transformers.__version__.split(".")[:2])
+    return {"dtype": dtype} if (major, minor) >= (4, 56) else {"torch_dtype": dtype}
+
+
+def compare_export(
+    checkpoint: str | Path,
+    export_dir: str | Path,
+    *,
+    prompt: str = "The water cycle",
+    device: str = "cpu",
+    tolerance: float = 1e-4,
+    new_tokens: int = 12,
+) -> dict[str, Any]:
+    """Check that an export is the model in ``checkpoint``, as a Hugging Face
+    consumer would load it: ``AutoModelForCausalLM`` + ``AutoTokenizer`` from
+    the export folder only. Compares logits on ``prompt`` and greedy
+    generation token for token. Returns a report; ``report["ok"]`` is the
+    verdict and ``report["problems"]`` says what failed."""
+    _require_torch()
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    export_dir = Path(export_dir)
+    problems: list[str] = []
+    tokenizer = AutoTokenizer.from_pretrained(export_dir, local_files_only=True)
+    exported = AutoModelForCausalLM.from_pretrained(export_dir, local_files_only=True, **_dtype_kwargs(torch.float32)).to(device).eval()
+    architectures = list(getattr(exported.config, "architectures", None) or [])
+    raw = _safe_load(checkpoint)
+    config = config_from_dict(raw["config"])
+    original = build_model(config.model, seed=config.training.seed)
+    load_checkpoint(checkpoint, model=original, map_location="cpu")
+    original = original.to(device).eval()
+    if architectures != [original.__class__.__name__]:
+        problems.append(f"export architectures {architectures} != trained {original.__class__.__name__}")
+    tied = exported.get_input_embeddings().weight.data_ptr() == exported.get_output_embeddings().weight.data_ptr()
+    if config.model.tie_embeddings and not tied:
+        problems.append("export lost its tied embeddings")
+
+    ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(device)
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    with torch.no_grad():
+        max_diff = float((original(input_ids=ids).logits.float() - exported(input_ids=ids).logits.float()).abs().max())
+        greedy_trained = original.generate(ids, max_new_tokens=new_tokens, do_sample=False, pad_token_id=pad)
+        greedy_export = exported.generate(ids, max_new_tokens=new_tokens, do_sample=False, pad_token_id=pad)
+    if max_diff > tolerance:
+        problems.append(f"logits differ by {max_diff:g} (> {tolerance:g})")
+    greedy_match = bool(torch.equal(greedy_trained, greedy_export))
+    if not greedy_match:
+        problems.append("greedy generation differs")
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "architectures": architectures,
+        "tied_embeddings": tied,
+        "parameters": sum(p.numel() for p in exported.parameters()),
+        "context_length": getattr(exported.config, "max_position_embeddings", None),
+        "device": device,
+        "prompt": prompt,
+        "max_abs_logit_diff": max_diff,
+        "greedy_match": greedy_match,
+        "greedy_text": tokenizer.decode(greedy_export[0], skip_special_tokens=True),
+    }
+
+
+__all__ = ["compare_export", "export_checkpoint", "export_hf"]

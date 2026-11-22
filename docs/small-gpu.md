@@ -86,6 +86,16 @@ python -m trashpanda export --checkpoint runs/22m/checkpoint-00001000.pt \
 checkpoint, so they need neither the prepared directory's tokenizer nor a Hugging
 Face cache.
 
+The export is a standard Hugging Face folder. Load it with transformers, confirm it
+matches the checkpoint, and generate:
+
+```bash
+python scripts/run_export.py runs/22m-export --check runs/22m/checkpoint-00001000.pt
+```
+
+To run all of this in a container, or publish the export to Hugging Face, see
+[Containers](containers.md).
+
 ### Tuning
 
 - **Out of memory:** lower `--microbatch-size` (it must divide the batch size of
