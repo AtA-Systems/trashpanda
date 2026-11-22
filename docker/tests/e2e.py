@@ -52,6 +52,25 @@ def last_json(text: str) -> dict:
     return json.loads(text[start:])
 
 
+def built_for(archs, major: int, minor: int) -> bool:
+    """Can a torch build with these arch entries run on a compute major.minor GPU?
+
+    CUDA machine code (sm_XY) runs on any GPU with the same major version and
+    an equal or newer minor version (sm_60 code runs on sm_61), and PTX
+    (compute_XY) can be JIT-compiled for any equal or newer GPU.
+    """
+    for arch in archs:
+        kind, _, number = arch.partition("_")
+        if not number.isdigit() or len(number) < 2:
+            continue
+        arch_major, arch_minor = int(number[:-1]), int(number[-1])
+        if kind == "sm" and arch_major == major and arch_minor <= minor:
+            return True
+        if kind == "compute" and (arch_major, arch_minor) <= (major, minor):
+            return True
+    return False
+
+
 def stage_environment(args: argparse.Namespace) -> dict:
     import torch
     import transformers
@@ -71,9 +90,7 @@ def stage_environment(args: argparse.Namespace) -> dict:
         for index in range(torch.cuda.device_count()):
             major, minor = torch.cuda.get_device_capability(index)
             sm = f"sm_{major}{minor}"
-            # A device runs if its exact sm is built, or PTX for an older sm of
-            # the same major can be JIT-compiled.
-            runnable = sm in archs or any(a.startswith("compute_") and int(a[8:]) <= major * 10 + minor for a in archs)
+            runnable = built_for(archs, major, minor)
             info["devices"].append({"index": index, "name": torch.cuda.get_device_name(index), "capability": f"{major}.{minor}", "built_for_it": runnable})
             if not runnable:
                 message = f"GPU {index} ({torch.cuda.get_device_name(index)}, {sm}) is not in this torch build {sorted(archs)}: wrong image flavor for this GPU"
