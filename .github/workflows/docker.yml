@@ -82,19 +82,22 @@ jobs:
 
       - name: Test inside the image (no GPU)
         run: |
-          mkdir -p out && chmod 777 out
-          docker run --rm -e CUDA_VISIBLE_DEVICES= -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \
-            -w /opt/trashpanda ${{ steps.tags.outputs.local }} \
+          mkdir -p out
+          # Run as the runner's user, as on GPU hosts, so files written to the
+          # mounted folder stay readable by later steps.
+          RUN="docker run --rm --user $(id -u):$(id -g) -e HOME=/work -e CUDA_VISIBLE_DEVICES="
+          $RUN -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -w /opt/trashpanda ${{ steps.tags.outputs.local }} \
             python -m pytest -q -p no:cacheprovider -m "unit or acceptance"
-          docker run --rm -e CUDA_VISIBLE_DEVICES= -v "$PWD/out:/out" ${{ steps.tags.outputs.local }} \
+          $RUN -v "$PWD/out:/out" ${{ steps.tags.outputs.local }} \
             python /opt/trashpanda/docker/tests/e2e.py --mode tiny --out /out/e2e-tiny
 
       - name: Upload test report
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: e2e-tiny-${{ matrix.flavor }}
-          path: out/
+          path: out/e2e-tiny/report.json
           if-no-files-found: warn
 
       - name: Push
