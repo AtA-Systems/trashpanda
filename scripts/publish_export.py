@@ -120,7 +120,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 tok = AutoTokenizer.from_pretrained("{repo}")
 model = AutoModelForCausalLM.from_pretrained("{repo}")
 ids = tok("The water cycle", return_tensors="pt")
-print(tok.decode(model.generate(**ids, max_new_tokens=64, do_sample=True, temperature=0.7, top_k=40)[0]))
+out = model.generate(**ids, max_new_tokens=64, do_sample=True, temperature=0.7, top_k=40)
+print(tok.decode(out[0], skip_special_tokens=True))
 ```
 
 Serve with vLLM (compute capability 7.0+; completions only, no chat template):

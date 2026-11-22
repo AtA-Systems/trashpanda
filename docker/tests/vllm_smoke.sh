@@ -3,6 +3,7 @@
 # (OpenAI-compatible /v1/models and /v1/completions).
 #
 #   docker/tests/vllm_smoke.sh /path/to/export
+#   docker/tests/vllm_smoke.sh ata-systems/trashpanda-40m-titanx     # published model, pulled from Hugging Face
 #
 # Needs a GPU with compute capability >= 7.0 (vLLM does not run on Pascal),
 # Docker with the NVIDIA Container Toolkit, curl and python3 on the host.
@@ -15,19 +16,35 @@
 #   PORT        host port, bound to 127.0.0.1 only (default 18000)
 #   DTYPE       vLLM --dtype (default auto: FP16 for an FP32 export)
 #   GPU_UTIL    vLLM --gpu-memory-utilization (default 0.30)
+#   MAX_LEN     vLLM --max-model-len (default 512, the small recipes' context)
+#   HF_HOME     Hugging Face cache with the token, for a private repo id
+#               (default ~/.cache/huggingface); HF_TOKEN, if set, wins
 set -euo pipefail
 
-EXPORT=$(realpath "${1:?usage: vllm_smoke.sh EXPORT_DIR}")
+MODEL=${1:?usage: vllm_smoke.sh EXPORT_DIR|REPO_ID}
 VLLM_IMAGE=${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}
 GPU=${GPU:-0}
 PORT=${PORT:-18000}
 DTYPE=${DTYPE:-auto}
 GPU_UTIL=${GPU_UTIL:-0.30}
+MAX_LEN=${MAX_LEN:-512}
 NAME="tp-vllm-smoke-$$"
 SERVED="trashpanda-smoke"
 BASE="http://127.0.0.1:${PORT}"
 
-[[ -f "$EXPORT/config.json" && -f "$EXPORT/model.safetensors" ]] || { echo "FAIL: $EXPORT is not a trashpanda export"; exit 1; }
+if [[ -d "$MODEL" ]]; then
+  EXPORT=$(realpath "$MODEL")
+  [[ -f "$EXPORT/config.json" && -f "$EXPORT/model.safetensors" ]] || { echo "FAIL: $EXPORT is not a trashpanda export"; exit 1; }
+  SOURCE=(-v "$EXPORT:/models/tp:ro")
+  TARGET=/models/tp
+else
+  # A Hugging Face repo id: vLLM downloads it, using the token for private repos.
+  HF_CACHE=${HF_HOME:-$HOME/.cache/huggingface}
+  if [[ -z "${HF_TOKEN:-}" && -r "$HF_CACHE/token" ]]; then HF_TOKEN=$(<"$HF_CACHE/token"); fi
+  export HF_TOKEN
+  SOURCE=(-v "$HF_CACHE:/root/.cache/huggingface" -e HF_TOKEN)
+  TARGET=$MODEL
+fi
 
 cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader -i "$GPU" | tr -d ' ')
 if awk -v c="$cap" 'BEGIN { exit !(c < 7.0) }'; then
@@ -46,14 +63,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[start] $VLLM_IMAGE on GPU $GPU (compute $cap), export $EXPORT"
+echo "[start] $VLLM_IMAGE on GPU $GPU (compute $cap), model $MODEL"
 # The image's entrypoint is `vllm serve`, so the model path is the first argument.
 docker run -d --name "$NAME" --gpus "device=$GPU" --ipc=host \
   -p "127.0.0.1:${PORT}:8000" \
-  -v "$EXPORT:/models/tp:ro" \
-  "$VLLM_IMAGE" /models/tp \
+  "${SOURCE[@]}" \
+  "$VLLM_IMAGE" "$TARGET" \
   --served-model-name "$SERVED" \
-  --max-model-len 512 \
+  --max-model-len "$MAX_LEN" \
   --dtype "$DTYPE" \
   --gpu-memory-utilization "$GPU_UTIL" \
   --enforce-eager >/dev/null
@@ -85,4 +102,4 @@ assert used > 0 and text.strip(), r
 print('  tokens:', used)
 print('  text  :', repr(text))"
 
-echo "PASS: vLLM served the export through the OpenAI API"
+echo "PASS: vLLM served $MODEL through the OpenAI API"

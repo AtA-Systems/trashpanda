@@ -198,6 +198,7 @@ code change reuses it.
 ```bash
 docker/test-image.sh trashpanda:dev-pascal --data /data/datasets/fw-40m-titanx          # Pascal host
 docker/test-image.sh trashpanda:dev-modern --data /data/datasets/fw-40m-titanx --vllm   # Turing or newer
+docker/test-image.sh trashpanda:dev-modern --hub-model ata-systems/trashpanda-40m-titanx --vllm   # a published model
 ```
 
 ```mermaid
@@ -213,6 +214,8 @@ flowchart LR
 | e2e-tiny | prepare → train → evaluate → sample → export → provenance verify → transformers, with no GPU or network |
 | e2e-gpu | The image's PyTorch runs on these cards (a wrong flavor fails with "wrong image flavor") and makes a servable export |
 | vllm | vLLM serves that export and answers `/v1/models` and `/v1/completions` |
+| hub-model | With `--hub-model REPO`: the published model downloads from Hugging Face inside the container (token from `/hf`), its provenance bundle verifies, and it loads with `transformers` and generates |
+| vllm-hub | With `--hub-model REPO --vllm`: vLLM pulls the published model from Hugging Face and answers the API, as the gateway will |
 
 The transformers stage (`trashpanda.export.compare_export`) loads the export with
 `AutoModelForCausalLM`/`AutoTokenizer`, checks `LlamaForCausalLM` with tied
@@ -341,7 +344,9 @@ tok = AutoTokenizer.from_pretrained("ata-systems/trashpanda-40m-titanx")       #
 model = AutoModelForCausalLM.from_pretrained("ata-systems/trashpanda-40m-titanx")
 ```
 
-or `python scripts/run_export.py <local folder>` for a downloaded copy.
+or `python scripts/run_export.py ata-systems/trashpanda-40m-titanx`, which downloads it, prints
+what it loaded and generates. Add `--check <checkpoint>` to prove the published copy is
+bit-for-bit the trained model (logits within 1e-4, identical greedy tokens).
 
 ## Serve with vLLM
 
@@ -359,7 +364,9 @@ curl -s localhost:8000/v1/completions -H 'Content-Type: application/json' \
   which trashpanda doesn't produce yet.
 - vLLM needs compute capability 7.0+. On Pascal hosts, use Ollama or llama.cpp's
   server for local inference; both offer an OpenAI-compatible API.
-- `docker/tests/vllm_smoke.sh <export>` does this end to end and checks the answers.
+- `docker/tests/vllm_smoke.sh <export folder or repo id>` does this end to end and checks
+  the answers; with a repo id, vLLM downloads the published model using the token in
+  `$HF_HOME`.
 
 ## Data-center hosts: Hetzner GEX63
 

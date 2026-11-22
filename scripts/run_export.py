@@ -8,11 +8,13 @@ training checkpoint and confirms the export gives the same logits and the same
 greedy tokens (``trashpanda.export.compare_export``).
 
   python scripts/run_export.py /data/runs/40m-titanx-export
+  python scripts/run_export.py ata-systems/trashpanda-40m-titanx          # from Hugging Face
   python scripts/run_export.py /data/runs/40m-titanx-export --prompt "Photosynthesis is" --greedy
   python scripts/run_export.py /data/runs/40m-titanx-export \\
       --check /data/runs/40m-titanx/checkpoint-00012231.pt
 """
 import argparse
+from pathlib import Path
 
 import torch
 import transformers
@@ -29,7 +31,8 @@ def dtype_kwargs(dtype):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("export", help="folder written by `trashpanda export`")
+    parser.add_argument("export", help="folder written by `trashpanda export`, or a Hugging Face repo id")
+    parser.add_argument("--revision", help="branch, tag or commit when EXPORT is a repo id")
     parser.add_argument("--prompt", action="append", help="repeatable; default: three sample prompts")
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -40,6 +43,12 @@ def main():
     parser.add_argument("--check", metavar="CHECKPOINT", help="confirm the export matches this trashpanda checkpoint")
     args = parser.parse_args()
     prompts = args.prompt or DEFAULT_PROMPTS
+    if not Path(args.export).is_dir():
+        from huggingface_hub import snapshot_download
+
+        local = snapshot_download(args.export, repo_type="model", revision=args.revision)
+        print(f"downloaded {args.export}{'@' + args.revision if args.revision else ''} to {local}")
+        args.export = local
 
     tokenizer = AutoTokenizer.from_pretrained(args.export, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(args.export, local_files_only=True, **dtype_kwargs(torch.float32))

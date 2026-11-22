@@ -12,10 +12,14 @@ Modes:
   gpu   A short 40m-titanx run on CUDA from an already prepared dataset
         (--data). Proves the image works on this host's GPUs and produces an
         export that vLLM can serve (see vllm_smoke.sh).
+  hub   A published model (--hub-model ata-systems/...): download it from
+        Hugging Face, verify its provenance bundle, load it with transformers
+        and generate. Uses the token in HF_HOME for private repos.
 
 Examples (inside the image):
   python docker/tests/e2e.py --mode tiny --out /work/e2e-tiny
   python docker/tests/e2e.py --mode gpu --data /data/prepared --gpus 2 --out /out/e2e-gpu
+  python docker/tests/e2e.py --mode hub --hub-model ata-systems/trashpanda-40m-titanx --out /out/hub-model
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -94,7 +99,7 @@ def stage_environment(args: argparse.Namespace) -> dict:
             info["devices"].append({"index": index, "name": torch.cuda.get_device_name(index), "capability": f"{major}.{minor}", "built_for_it": runnable})
             if not runnable:
                 message = f"GPU {index} ({torch.cuda.get_device_name(index)}, {sm}) is not in this torch build {sorted(archs)}: wrong image flavor for this GPU"
-                if args.mode == "gpu":
+                if args.mode != "tiny":
                     raise StageFailed(message)
                 info.setdefault("warnings", []).append(message)
                 continue
@@ -192,6 +197,63 @@ def stage_provenance(args: argparse.Namespace) -> dict:
     return last_json(cli("provenance", "verify", args.export, "--json", timeout=300))
 
 
+def stage_download(args: argparse.Namespace) -> dict:
+    from huggingface_hub import snapshot_download
+
+    local = Path(snapshot_download(args.hub_model, repo_type="model", revision=args.revision))
+    files = sorted(p.relative_to(local).as_posix() for p in local.rglob("*") if p.is_file())
+    for required in ("config.json", "model.safetensors"):
+        if required not in files:
+            raise StageFailed(f"{args.hub_model} has no {required}: {files}")
+    args.export = str(local)
+    return {"repo": args.hub_model, "revision": args.revision or "main", "local": str(local), "files": len(files)}
+
+
+def stage_hub_provenance(args: argparse.Namespace, out: Path) -> dict:
+    # The Hub adds README.md (model card) and .gitattributes, which the bundle
+    # doesn't list; verify a copy without them.
+    copy = out / "bundle"
+    shutil.rmtree(copy, ignore_errors=True)
+    shutil.copytree(args.export, copy, ignore=shutil.ignore_patterns("README.md", ".gitattributes"))
+    return last_json(cli("provenance", "verify", str(copy), "--json", timeout=300))
+
+
+def stage_hub_transformers(args: argparse.Namespace) -> dict:
+    """Load the published model the way a consumer would and generate."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from trashpanda.export import _dtype_kwargs
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tokenizer = AutoTokenizer.from_pretrained(args.export, local_files_only=True)
+    model = AutoModelForCausalLM.from_pretrained(args.export, local_files_only=True, **_dtype_kwargs(torch.float32)).to(device).eval()
+    ids = tokenizer(GPU_PROMPT, return_tensors="pt")["input_ids"].to(device)
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    with torch.no_grad():
+        logits = model(input_ids=ids).logits.float()
+        out = model.generate(ids, max_new_tokens=24, do_sample=False, pad_token_id=pad)
+    if not torch.isfinite(logits).all():
+        raise StageFailed("non-finite logits from the published model")
+    text = tokenizer.decode(out[0], skip_special_tokens=True)
+    if len(out[0]) <= ids.shape[1]:
+        raise StageFailed("the published model generated no tokens")
+    report = {
+        "device": device,
+        "architectures": list(model.config.architectures or []),
+        "parameters": sum(p.numel() for p in model.parameters()),
+        "context_length": model.config.max_position_embeddings,
+        "new_tokens": int(len(out[0]) - ids.shape[1]),
+        "greedy_text": text,
+    }
+    if device == "cuda":
+        half = AutoModelForCausalLM.from_pretrained(args.export, local_files_only=True, **_dtype_kwargs(torch.float16)).to(device).eval()
+        with torch.no_grad():
+            c = half(input_ids=ids).logits.float()
+        report["fp16_max_abs_logit_diff"] = float((logits - c).abs().max())
+        report["fp16_top1_agreement"] = float((logits.argmax(-1) == c.argmax(-1)).float().mean())
+    return report
+
+
 def stage_transformers(args: argparse.Namespace) -> dict:
     """Load the export the way any Hugging Face consumer would, and check it is
     the same model trashpanda trained (trashpanda.export.compare_export)."""
@@ -222,7 +284,9 @@ def stage_transformers(args: argparse.Namespace) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=("tiny", "gpu"), default="tiny")
+    parser.add_argument("--mode", choices=("tiny", "gpu", "hub"), default="tiny")
+    parser.add_argument("--hub-model", help="Hugging Face repo id (hub mode)")
+    parser.add_argument("--revision", help="branch, tag or commit of --hub-model")
     parser.add_argument("--data", help="prepared dataset directory (gpu mode)")
     parser.add_argument("--recipe", default="40m-titanx", help="gpu mode recipe (default 40m-titanx)")
     parser.add_argument("--steps", type=int, default=20, help="gpu mode training updates (default 20)")
@@ -233,22 +297,32 @@ def main() -> int:
     args = parser.parse_args()
     if args.mode == "gpu" and not args.data:
         parser.error("gpu mode needs --data (a dataset made by prepare_fineweb_edu.py or `trashpanda prepare`)")
+    if args.mode == "hub" and not args.hub_model:
+        parser.error("hub mode needs --hub-model, e.g. ata-systems/trashpanda-40m-titanx")
     if args.mode == "tiny":
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    stages = [
-        ("environment", lambda: stage_environment(args)),
-        ("prepare", lambda: stage_prepare(args, out)),
-        ("train", lambda: stage_train(args, out)),
-        ("evaluate", lambda: stage_evaluate(args)),
-        ("sample", lambda: stage_sample(args)),
-        ("export", lambda: stage_export(args, out)),
-        ("provenance", lambda: stage_provenance(args)),
-        ("transformers", lambda: stage_transformers(args)),
-    ]
+    if args.mode == "hub":
+        stages = [
+            ("environment", lambda: stage_environment(args)),
+            ("download", lambda: stage_download(args)),
+            ("provenance", lambda: stage_hub_provenance(args, out)),
+            ("transformers", lambda: stage_hub_transformers(args)),
+        ]
+    else:
+        stages = [
+            ("environment", lambda: stage_environment(args)),
+            ("prepare", lambda: stage_prepare(args, out)),
+            ("train", lambda: stage_train(args, out)),
+            ("evaluate", lambda: stage_evaluate(args)),
+            ("sample", lambda: stage_sample(args)),
+            ("export", lambda: stage_export(args, out)),
+            ("provenance", lambda: stage_provenance(args)),
+            ("transformers", lambda: stage_transformers(args)),
+        ]
     report = {"mode": args.mode, "out": str(out), "stages": {}, "passed": False}
     failed = False
     for name, run in stages:

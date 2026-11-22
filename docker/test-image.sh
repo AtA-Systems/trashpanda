@@ -4,6 +4,7 @@
 #
 #   docker/test-image.sh IMAGE [--data DIR] [--gpus N] [--steps N] [--vllm] [--out DIR]
 #                        [--device DEV] [--gpu-memory-fraction F] [--recipe R] [--microbatch-size N]
+#                        [--hub-model REPO]
 #
 #   IMAGE     e.g. trashpanda:dev-pascal or ghcr.io/ata-systems/trashpanda:0.1.0-modern-cu130
 #   --data    a prepared dataset on the host (e.g. /data/datasets/fw-40m-titanx);
@@ -17,6 +18,9 @@
 #   --gpu-memory-fraction  cap trashpanda at this share of each GPU's memory, e.g. 0.2 on a
 #             card shared with a vLLM server (sets TRASHPANDA_CUDA_MEMORY_FRACTION)
 #   --recipe / --microbatch-size  recipe for the GPU run (default 40m-titanx at its default size)
+#   --hub-model  a published model, e.g. ata-systems/trashpanda-40m-titanx: pull it from Hugging
+#             Face inside the container, verify provenance, load and generate; with --vllm,
+#             also serve it (uses the token in $HF_HOME, mounted as /hf)
 #
 # Stages, each must pass (vLLM may SKIP on Pascal):
 #   1 gpu-visible   nvidia-smi inside the container sees the GPUs
@@ -25,13 +29,16 @@
 #   4 e2e-tiny      offline tiny run -> export -> transformers equivalence
 #   5 e2e-gpu       40m-titanx on CUDA -> export -> transformers on GPU (needs --data)
 #   6 vllm          OpenAI-API completion from vLLM serving that export (needs --vllm)
+#   7 hub-model     published model: download, verify provenance, transformers (needs --hub-model)
+#   8 vllm-hub      vLLM serving the published model from Hugging Face (needs --hub-model --vllm)
 set -uo pipefail
 
-IMAGE=${1:?usage: test-image.sh IMAGE [--data DIR] [--gpus N] [--steps N] [--vllm] [--out DIR] [--device DEV] [--gpu-memory-fraction F] [--recipe R] [--microbatch-size N]}
+IMAGE=${1:?usage: test-image.sh IMAGE [--data DIR] [--gpus N] [--steps N] [--vllm] [--out DIR] [--device DEV] [--gpu-memory-fraction F] [--recipe R] [--microbatch-size N] [--hub-model REPO]}
 shift
-DATA="" STEPS=20 VLLM=0 OUT="" GPUS="" DEVICE=all FRACTION="" RECIPE=40m-titanx MB=""
+DATA="" STEPS=20 VLLM=0 OUT="" GPUS="" DEVICE=all FRACTION="" RECIPE=40m-titanx MB="" HUB=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --hub-model) HUB=$2; shift 2 ;;
     --device) DEVICE=$2; shift 2 ;;
     --gpu-memory-fraction) FRACTION=$2; shift 2 ;;
     --recipe) RECIPE=$2; shift 2 ;;
@@ -94,6 +101,13 @@ if [[ -n "$DATA" ]]; then
     else
       order+=(vllm); RESULT[vllm]="SKIP (no export: e2e-gpu failed)"
     fi
+  fi
+fi
+
+if [[ -n "$HUB" ]]; then
+  stage hub-model "${RUN[@]}" "$IMAGE" python /opt/trashpanda/docker/tests/e2e.py --mode hub --hub-model "$HUB" --out /out/hub-model
+  if [[ $VLLM -eq 1 ]]; then
+    stage vllm-hub env HF_HOME="$HF_CACHE" "$HERE/tests/vllm_smoke.sh" "$HUB"
   fi
 fi
 

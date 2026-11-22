@@ -17,6 +17,7 @@ docker build -f docker/Dockerfile --build-arg FLAVOR=modern -t trashpanda:dev-mo
 # test on this host
 docker/test-image.sh trashpanda:dev-pascal --data /data/datasets/fw-40m-titanx
 docker/test-image.sh trashpanda:dev-modern --data /data/datasets/fw-40m-titanx --vllm
+docker/test-image.sh trashpanda:dev-pascal --hub-model ata-systems/trashpanda-40m-titanx   # a published model
 
 # train
 docker run --rm --gpus all --ipc=host --shm-size=8g --user "$(id -u):$(id -g)" -e HOME=/work \
@@ -28,5 +29,5 @@ Files here:
 
 - `Dockerfile`: both flavors (`--build-arg FLAVOR=pascal|modern`)
 - `test-image.sh`: tests an image on a host, stage by stage
-- `tests/e2e.py`: train → evaluate → sample → export → provenance → transformers
-- `tests/vllm_smoke.sh`: serves an export with vLLM and calls its OpenAI API
+- `tests/e2e.py`: train → evaluate → sample → export → provenance → transformers; `--mode hub` checks a published model
+- `tests/vllm_smoke.sh`: serves an export folder or a Hugging Face repo id with vLLM and calls its OpenAI API
