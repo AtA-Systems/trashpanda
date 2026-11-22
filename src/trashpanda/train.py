@@ -465,6 +465,8 @@ def train(
                 if parameter.grad is not None and not _finite_tensor(parameter.grad):
                     raise FloatingPointError("non-finite gradient encountered")
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.grad_clip, error_if_nonfinite=True)
+            # The rate this update actually uses (warmup/cosine schedule), for metrics.
+            update_lr = float(optimizer.param_groups[0]["lr"])
             if scaler.is_enabled():
                 scaler.step(optimizer)
                 scaler.update()
@@ -501,7 +503,7 @@ def train(
                     "step": state.update_step,
                     "targets": state.consumed_tokens,
                     "train_loss": update_loss / config.training.grad_accumulation_steps,
-                    "learning_rate": config.training.learning_rate,
+                    "learning_rate": update_lr,
                     "elapsed_seconds": time.perf_counter() - run_started,
                 }, sort_keys=True) + "\n")
             if should_stop:
