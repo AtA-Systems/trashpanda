@@ -412,7 +412,7 @@ def train(
         prior_counts = prior_provenance["run_record"].get("actual_target_accounting", {}).get("source_target_counts", {})
         if isinstance(prior_counts, Mapping):
             source_target_totals.update({str(key): int(value) for key, value in prior_counts.items()})
-    scaler = torch.cuda.amp.GradScaler(enabled=config.training.precision == "fp16" and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=config.training.precision == "fp16" and device.type == "cuda")
     autocast_enabled = config.training.precision in {"bf16", "fp16"} and device.type == "cuda"
     autocast_dtype = torch.bfloat16 if config.training.precision == "bf16" else torch.float16
 
