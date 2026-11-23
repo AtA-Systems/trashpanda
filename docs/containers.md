@@ -162,10 +162,10 @@ sequenceDiagram
   You->>Docker: docker run --gpus all … trashpanda train
   Docker->>Toolkit: GPUs requested
   Toolkit->>C: mount driver libs, /dev/nvidia*, nvidia-smi
-  Docker->>C: mount /data/prepared (ro), /runs, /hf; run as your uid
+  Docker->>C: mount /data/prepared (ro), /runs, /hf, run as your uid
   C->>C: torch loads its bundled CUDA 12.6 or 13.0 runtime
   C->>C: train: read shards, write checkpoint-*.pt + metrics.jsonl to /runs
-  C-->>You: exit 0; container removed, results stay in /data/runs
+  C-->>You: exit 0, container removed, results stay in /data/runs
 ```
 
 The same pattern runs every other step:
