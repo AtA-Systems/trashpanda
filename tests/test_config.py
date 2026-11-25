@@ -28,6 +28,11 @@ def test_small_single_gpu_recipe():
     assert load_config("40m-titanx", overrides={"microbatch_size": 16}).training.microbatch_size == 16
     with pytest.raises(ValueError, match="only supports"):
         model_recipe("40m-titanx", "gpt2")
+    medium = get_recipe("110m-titanx")
+    assert medium.parameter_count == 109_529_856
+    assert (medium.model.context_length, medium.model.vocab_size) == (small.model.context_length, small.model.vocab_size)
+    assert (medium.training.batch_size, medium.training.learning_rate, medium.training.warmup_steps) == (small.training.batch_size, small.training.learning_rate, small.training.warmup_steps)
+    assert (medium.training.precision, medium.training.device) == ("fp32", "cuda")
     laptop = get_recipe("22m-gtx1060")
     assert laptop.parameter_count == 22_467_456
     assert laptop.model.context_length == small.model.context_length

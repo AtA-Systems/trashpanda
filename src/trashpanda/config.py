@@ -21,7 +21,7 @@ MISTRAL_TOKENIZER_HASHES = MISTRAL_TOKENIZER_FILE_HASHES
 MISTRAL_TOKENIZER_SHA256 = MISTRAL_TOKENIZER_FILE_HASHES["tokenizer.json"]
 MISTRAL_TOKENIZER_FILES_SHA256 = MISTRAL_TOKENIZER_FILE_HASHES
 MODEL_ARCHITECTURES = ("llama", "gpt2")
-RECIPE_NAMES = ("tiny", "300m-a100", "40m-titanx", "22m-gtx1060")
+RECIPE_NAMES = ("tiny", "300m-a100", "40m-titanx", "110m-titanx", "22m-gtx1060")
 
 
 @dataclass(frozen=True)
@@ -300,6 +300,16 @@ def _recipes() -> dict[str, Config]:
             data=DataConfig(),
             training=TrainingConfig(batch_size=32, microbatch_size=8, token_budget=200_000_000, checkpoint_interval=500, precision="fp32", device="cuda", learning_rate=3e-4, warmup_steps=200, min_lr_ratio=0.1, seed=42, repeat_data=True),
             runtime=RuntimeConfig(output_dir="runs/40m-titanx"),
+        ),
+        # Two 12 GB pre-Turing cards: ~110M params, FP32, same 512 context and
+        # tokenizer as 40m-titanx so prepared shards are shared. Same batch,
+        # learning rate and schedule as 40m-titanx, so only model size changes.
+        "110m-titanx": Config(
+            recipe_name="110m-titanx",
+            model=ModelConfig(vocab_size=32_000, num_layers=12, hidden_size=768, intermediate_size=2048, context_length=512, num_attention_heads=12),
+            data=DataConfig(),
+            training=TrainingConfig(batch_size=32, microbatch_size=8, token_budget=800_000_000, checkpoint_interval=500, precision="fp32", device="cuda", learning_rate=3e-4, warmup_steps=200, min_lr_ratio=0.1, seed=42, repeat_data=True),
+            runtime=RuntimeConfig(output_dir="runs/110m-titanx"),
         ),
         # Single 6 GB laptop-class pre-Turing card (e.g. GTX 1060 Mobile).
         # Same 512 context and tokenizer as 40m-titanx, so prepared shards are
